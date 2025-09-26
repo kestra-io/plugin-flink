@@ -5,7 +5,7 @@
 </p>
 
 <h1 align="center" style="border-bottom: none">
-    Event-Driven Declarative Orchestrator
+    Apache Flink Plugin for Kestra
 </h1>
 
 <div align="center">
@@ -25,21 +25,95 @@
 </p>
 
 <br />
-<p align="center">
-    <a href="https://go.kestra.io/video/product-overview" target="_blank">
-        <img src="https://kestra.io/startvideo.png" alt="Get started in 4 minutes with Kestra" width="640px" />
-    </a>
-</p>
-<p align="center" style="color:grey;"><i>Get started with Kestra in 4 minutes.</i></p>
 
+This plugin provides tasks for orchestrating Apache Flink jobs within Kestra workflows. It supports both streaming and batch processing scenarios and integrates with Flink's REST API and SQL Gateway.
 
-# Kestra Plugin Template
+## Features
 
-> A template for creating Kestra plugins
+- **Submit Jobs**: Submit JAR-based jobs to Flink clusters
+- **SQL Execution**: Execute SQL statements via Flink SQL Gateway
+- **Job Monitoring**: Monitor job status and wait for completion
+- **Job Cancellation**: Cancel running jobs with optional savepoint creation
+- **Savepoint Management**: Trigger savepoints for job state preservation
 
-This repository serves as a general template for creating a new [Kestra](https://github.com/kestra-io/kestra) plugin. It should take only a few minutes! Use this repository as a scaffold to ensure that you've set up the plugin correctly, including unit tests and CI/CD workflows.
+## Tasks
 
-![Kestra orchestrator](https://kestra.io/video.gif)
+### Submit
+Submits a Flink job using a JAR file to a Flink cluster.
+
+```yaml
+- id: submit-flink-job
+  type: io.kestra.plugin.flink.Submit
+  restUrl: "http://flink-jobmanager:8081"
+  jarUri: "s3://flink/jars/my-job.jar"
+  entryClass: "com.example.Main"
+  args:
+    - "--input"
+    - "s3://input/data"
+  parallelism: 4
+```
+
+### SubmitSql
+Executes SQL statements via Flink SQL Gateway.
+
+**Note:** For streaming jobs that reach `RUNNING` state, the SQL Gateway session is kept alive to allow the job to continue. Batch jobs that reach `FINISHED` state will have their temporary sessions cleaned up automatically.
+
+```yaml
+- id: run-sql
+  type: io.kestra.plugin.flink.SubmitSql
+  gatewayUrl: "http://flink-sql-gateway:8083"
+  statement: |
+    INSERT INTO enriched_orders
+    SELECT o.order_id, o.customer_id, c.name, o.amount
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.id
+  sessionConfig:
+    catalog: "default_catalog"
+    database: "default_database"
+    configuration:
+      execution.runtime-mode: "streaming"
+```
+
+### MonitorJob
+Monitors a Flink job until it reaches a terminal state.
+
+```yaml
+- id: monitor-job
+  type: io.kestra.plugin.flink.MonitorJob
+  restUrl: "http://flink-jobmanager:8081"
+  jobId: "{{ outputs.submit-flink-job.jobId }}"
+  waitTimeout: "PT30M"
+```
+
+### Cancel
+Cancels a running Flink job with optional savepoint creation.
+
+```yaml
+- id: cancel-job
+  type: io.kestra.plugin.flink.Cancel
+  restUrl: "http://flink-jobmanager:8081"
+  jobId: "{{ inputs.jobId }}"
+  withSavepoint: true
+  savepointDir: "s3://flink/savepoints/canceled"
+```
+
+### TriggerSavepoint
+Triggers a savepoint for a running job without canceling it.
+
+```yaml
+- id: create-savepoint
+  type: io.kestra.plugin.flink.TriggerSavepoint
+  restUrl: "http://flink-jobmanager:8081"
+  jobId: "{{ inputs.jobId }}"
+  targetDirectory: "s3://flink/savepoints/backup"
+```
+
+## Requirements
+
+- Flink cluster with REST API enabled (default port 8081)
+- For SQL tasks: Flink SQL Gateway (default port 8083)
+- Network connectivity from Kestra to Flink cluster
+- Appropriate permissions for savepoint directories (if using external storage)
 
 ## Running the project in local
 ### Prerequisites
