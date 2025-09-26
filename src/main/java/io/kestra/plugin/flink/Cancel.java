@@ -2,7 +2,6 @@ package io.kestra.plugin.flink;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
@@ -15,6 +14,7 @@ import org.slf4j.Logger;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kestra.core.serializers.JacksonMapper;
 import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.net.URI;
@@ -66,13 +66,12 @@ import java.time.Duration;
 )
 public class Cancel extends Task implements RunnableTask<Cancel.Output> {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = JacksonMapper.ofJson();
 
     @Schema(
         title = "Flink REST API URL",
         description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> restUrl;
 
@@ -80,7 +79,6 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         title = "Job ID",
         description = "The ID of the Flink job to cancel"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> jobId;
 
@@ -88,7 +86,6 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         title = "Create savepoint before cancellation",
         description = "Whether to trigger a savepoint before canceling the job. Defaults to false."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Boolean> withSavepoint = Property.of(false);
 
@@ -96,7 +93,6 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         title = "Savepoint directory",
         description = "Target directory for the savepoint. Required if withSavepoint is true."
     )
-    @PluginProperty(dynamic = true)
     private Property<String> savepointDir;
 
     @Schema(
@@ -104,7 +100,6 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         description = "Whether to drain the job (process all remaining input) before cancellation. " +
                       "Only applicable for streaming jobs. Defaults to false."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Boolean> drainJob = Property.of(false);
 
@@ -112,7 +107,6 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         title = "Cancellation timeout",
         description = "Maximum time to wait for cancellation to complete in seconds. Defaults to 60."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Integer> cancellationTimeout = Property.of(60);
 

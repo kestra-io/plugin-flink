@@ -26,7 +26,7 @@ class SubmitTest {
     private RunContextFactory runContextFactory;
 
     @Test
-    void testSubmitTaskCreation() {
+    void testSubmitTaskCreation() throws Exception {
         Submit submit = Submit.builder()
             .id("test-submit")
             .type(Submit.class.getName())
@@ -37,12 +37,20 @@ class SubmitTest {
             .parallelism(Property.of(4))
             .build();
 
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
+
         assertThat(submit.getId(), is("test-submit"));
-        // Just test that properties are properly set - we can't test .as() without a RunContext
-        assertThat(submit.getRestUrl(), notNullValue());
-        assertThat(submit.getJarUri(), notNullValue());
-        assertThat(submit.getEntryClass(), notNullValue());
-        assertThat(submit.getParallelism(), notNullValue());
+
+        // Test property rendering with runContext
+        String renderedUrl = runContext.render(submit.getRestUrl()).as(String.class).orElseThrow();
+        String renderedJarUri = runContext.render(submit.getJarUri()).as(String.class).orElseThrow();
+        String renderedEntryClass = runContext.render(submit.getEntryClass()).as(String.class).orElseThrow();
+        Integer renderedParallelism = runContext.render(submit.getParallelism()).as(Integer.class).orElseThrow();
+
+        assertThat(renderedUrl, is("http://localhost:8081"));
+        assertThat(renderedJarUri, is("file:///path/to/job.jar"));
+        assertThat(renderedEntryClass, is("com.example.Main"));
+        assertThat(renderedParallelism, is(4));
     }
 
     @Test
@@ -72,7 +80,7 @@ class SubmitTest {
     }
 
     @Test
-    void testSubmitTaskWithSavepoint() {
+    void testSubmitTaskWithSavepoint() throws Exception {
         Submit submit = Submit.builder()
             .id("test-submit-savepoint")
             .type(Submit.class.getName())
@@ -83,12 +91,24 @@ class SubmitTest {
             .allowNonRestoredState(Property.of(true))
             .build();
 
-        assertThat(submit.getRestoreFromSavepoint(), notNullValue());
-        assertThat(submit.getAllowNonRestoredState(), notNullValue());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
+
+        // Test property rendering with runContext
+        String renderedUrl = runContext.render(submit.getRestUrl()).as(String.class).orElseThrow();
+        String renderedJarUri = runContext.render(submit.getJarUri()).as(String.class).orElseThrow();
+        String renderedEntryClass = runContext.render(submit.getEntryClass()).as(String.class).orElseThrow();
+        String renderedSavepoint = runContext.render(submit.getRestoreFromSavepoint()).as(String.class).orElseThrow();
+        Boolean renderedAllowNonRestored = runContext.render(submit.getAllowNonRestoredState()).as(Boolean.class).orElseThrow();
+
+        assertThat(renderedUrl, is("http://localhost:8081"));
+        assertThat(renderedJarUri, is("file:///path/to/job.jar"));
+        assertThat(renderedEntryClass, is("com.example.Main"));
+        assertThat(renderedSavepoint, is("s3://savepoints/latest"));
+        assertThat(renderedAllowNonRestored, is(true));
     }
 
     @Test
-    void testSubmitTaskWithJobConfig() {
+    void testSubmitTaskWithJobConfig() throws Exception {
         Map<String, String> config = new HashMap<>();
         config.put("execution.checkpointing.interval", "30s");
         config.put("state.backend", "rocksdb");
@@ -102,6 +122,14 @@ class SubmitTest {
             .jobConfig(Property.of(config))
             .build();
 
-        assertThat(submit.getJobConfig(), notNullValue());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
+
+        // Test property rendering with runContext
+        @SuppressWarnings("unchecked")
+        Map<String, String> renderedConfig = runContext.render(submit.getJobConfig()).as((Class<Map<String, String>>) (Class<?>) Map.class).orElseThrow();
+
+        assertThat(renderedConfig, notNullValue());
+        assertThat(renderedConfig.get("execution.checkpointing.interval"), is("30s"));
+        assertThat(renderedConfig.get("state.backend"), is("rocksdb"));
     }
 }
