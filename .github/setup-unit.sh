@@ -4,7 +4,7 @@
 echo "Setting up Flink test environment..."
 
 # Start Flink cluster using docker-compose
-docker-compose -f docker-compose-ci.yml up -d
+docker compose -f docker-compose-ci.yml up -d
 
 # Wait for Flink cluster to be ready
 echo "Waiting for Flink cluster to be ready..."
