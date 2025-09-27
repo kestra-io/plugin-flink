@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Setup Flink test environment
 echo "Setting up Flink test environment..."
@@ -23,6 +24,8 @@ done
 
 if [ $counter -ge $timeout ]; then
     echo "Timeout: Flink cluster failed to start"
+    docker-compose -f docker-compose-ci.yml logs
+    exit 1
     docker-compose -f docker-compose-ci.yml logs
     exit 1
 fi
