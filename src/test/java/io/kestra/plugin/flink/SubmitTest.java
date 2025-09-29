@@ -4,7 +4,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.TestsUtils;
-import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
+import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -20,7 +20,7 @@ import java.util.Map;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@MicronautTest
+@KestraTest
 class SubmitTest {
     @Inject
     private RunContextFactory runContextFactory;
@@ -42,15 +42,15 @@ class SubmitTest {
         assertThat(submit.getId(), is("test-submit"));
 
         // Test property rendering with runContext
-        String renderedUrl = runContext.render(submit.getRestUrl()).as(String.class).orElseThrow();
-        String renderedJarUri = runContext.render(submit.getJarUri()).as(String.class).orElseThrow();
-        String renderedEntryClass = runContext.render(submit.getEntryClass()).as(String.class).orElseThrow();
-        Integer renderedParallelism = runContext.render(submit.getParallelism()).as(Integer.class).orElseThrow();
+        String rUrl = runContext.render(submit.getRestUrl()).as(String.class).orElseThrow();
+        String rJarUri = runContext.render(submit.getJarUri()).as(String.class).orElseThrow();
+        String rEntryClass = runContext.render(submit.getEntryClass()).as(String.class).orElseThrow();
+        Integer rParallelism = runContext.render(submit.getParallelism()).as(Integer.class).orElseThrow();
 
-        assertThat(renderedUrl, is("http://localhost:8081"));
-        assertThat(renderedJarUri, is("file:///path/to/job.jar"));
-        assertThat(renderedEntryClass, is("com.example.Main"));
-        assertThat(renderedParallelism, is(4));
+        assertThat(rUrl, is("http://localhost:8081"));
+        assertThat(rJarUri, is("file:///path/to/job.jar"));
+        assertThat(rEntryClass, is("com.example.Main"));
+        assertThat(rParallelism, is(4));
     }
 
     @Test
@@ -94,17 +94,17 @@ class SubmitTest {
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
 
         // Test property rendering with runContext
-        String renderedUrl = runContext.render(submit.getRestUrl()).as(String.class).orElseThrow();
-        String renderedJarUri = runContext.render(submit.getJarUri()).as(String.class).orElseThrow();
-        String renderedEntryClass = runContext.render(submit.getEntryClass()).as(String.class).orElseThrow();
-        String renderedSavepoint = runContext.render(submit.getRestoreFromSavepoint()).as(String.class).orElseThrow();
-        Boolean renderedAllowNonRestored = runContext.render(submit.getAllowNonRestoredState()).as(Boolean.class).orElseThrow();
+        String rUrl = runContext.render(submit.getRestUrl()).as(String.class).orElseThrow();
+        String rJarUri = runContext.render(submit.getJarUri()).as(String.class).orElseThrow();
+        String rEntryClass = runContext.render(submit.getEntryClass()).as(String.class).orElseThrow();
+        String rSavepoint = runContext.render(submit.getRestoreFromSavepoint()).as(String.class).orElseThrow();
+        Boolean rAllowNonRestored = runContext.render(submit.getAllowNonRestoredState()).as(Boolean.class).orElseThrow();
 
-        assertThat(renderedUrl, is("http://localhost:8081"));
-        assertThat(renderedJarUri, is("file:///path/to/job.jar"));
-        assertThat(renderedEntryClass, is("com.example.Main"));
-        assertThat(renderedSavepoint, is("s3://savepoints/latest"));
-        assertThat(renderedAllowNonRestored, is(true));
+        assertThat(rUrl, is("http://localhost:8081"));
+        assertThat(rJarUri, is("file:///path/to/job.jar"));
+        assertThat(rEntryClass, is("com.example.Main"));
+        assertThat(rSavepoint, is("s3://savepoints/latest"));
+        assertThat(rAllowNonRestored, is(true));
     }
 
     @Test
@@ -126,10 +126,10 @@ class SubmitTest {
 
         // Test property rendering with runContext
         @SuppressWarnings("unchecked")
-        Map<String, String> renderedConfig = runContext.render(submit.getJobConfig()).as((Class<Map<String, String>>) (Class<?>) Map.class).orElseThrow();
+        Map<String, String> rConfig = runContext.render(submit.getJobConfig()).as((Class<Map<String, String>>) (Class<?>) Map.class).orElseThrow();
 
-        assertThat(renderedConfig, notNullValue());
-        assertThat(renderedConfig.get("execution.checkpointing.interval"), is("30s"));
-        assertThat(renderedConfig.get("state.backend"), is("rocksdb"));
+        assertThat(rConfig, notNullValue());
+        assertThat(rConfig.get("execution.checkpointing.interval"), is("30s"));
+        assertThat(rConfig.get("state.backend"), is("rocksdb"));
     }
 }

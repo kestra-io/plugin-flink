@@ -13,6 +13,8 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
+import io.kestra.core.utils.RetryUtils;
+import io.kestra.core.models.tasks.retrys.Exponential;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -146,22 +148,22 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     public SubmitSql.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String renderedGatewayUrl = runContext.render(this.gatewayUrl).as(String.class).orElseThrow();
-        String renderedStatement = runContext.render(this.statement).as(String.class).orElseThrow();
+        String rGatewayUrl = runContext.render(this.gatewayUrl).as(String.class).orElseThrow();
+        String rStatement = runContext.render(this.statement).as(String.class).orElseThrow();
 
-        logger.info("Executing SQL statement via Flink SQL Gateway at: {}", renderedGatewayUrl);
+        logger.info("Executing SQL statement via Flink SQL Gateway at: {}", rGatewayUrl);
 
         // Create or get session
-        String sessionHandle = createOrGetSession(runContext, renderedGatewayUrl);
+        String sessionHandle = createOrGetSession(runContext, rGatewayUrl);
 
         OperationResult result = null;
         boolean keepSessionOpen = false;
         try {
             // Execute SQL statement
-            String operationHandle = executeStatement(runContext, renderedGatewayUrl, sessionHandle, renderedStatement);
+            String operationHandle = executeStatement(runContext, rGatewayUrl, sessionHandle, rStatement);
 
             // Wait for completion and get results
-            result = waitForOperationCompletion(runContext, renderedGatewayUrl, sessionHandle, operationHandle);
+            result = waitForOperationCompletion(runContext, rGatewayUrl, sessionHandle, operationHandle);
             keepSessionOpen = "RUNNING".equals(result.getStatus());
 
             logger.info("SQL statement executed successfully. Operation handle: {}", operationHandle);
@@ -179,7 +181,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             String sessionName = this.sessionName != null ?
                 runContext.render(this.sessionName).as(String.class).orElse(null) : null;
             if (sessionName == null && !keepSessionOpen) {
-                closeSession(runContext, renderedGatewayUrl, sessionHandle);
+                closeSession(runContext, rGatewayUrl, sessionHandle);
             }
         }
     }
@@ -286,39 +288,71 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             .build();
 
         int timeout = runContext.render(statementTimeout).as(Integer.class).orElse(300);
-        long startTime = System.currentTimeMillis();
+        int maxAttempts = timeout; // Check every 1 second
 
-        while (true) {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle + "/operations/" + operationHandle + "/status"))
-                .timeout(Duration.ofSeconds(30))
-                .GET()
-                .build();
+        try {
+            return new RetryUtils().<OperationResult, Exception>of(
+                Exponential.builder()
+                    .delayFactor(1.0) // Fixed interval
+                    .interval(Duration.ofSeconds(1))
+                    .maxInterval(Duration.ofSeconds(1))
+                    .maxAttempts(maxAttempts)
+                    .build()
+            ).run(
+                (result, throwable) -> {
+                    // Don't retry if we got a successful result
+                    if (result != null) {
+                        return false;
+                    }
+                    // Don't retry on fatal exceptions
+                    if (throwable instanceof RuntimeException) {
+                        String message = throwable.getMessage();
+                        if (message != null && (message.contains("Operation failed with status:") || message.contains("Failed to get operation status:"))) {
+                            return false;
+                        }
+                    }
+                    // Retry on other cases
+                    return true;
+                },
+                () -> {
+                    HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle + "/operations/" + operationHandle + "/status"))
+                        .timeout(Duration.ofSeconds(30))
+                        .GET()
+                        .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                    HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Failed to get operation status: " + response.statusCode() + " - " + response.body());
+                    if (response.statusCode() != 200) {
+                        throw new RuntimeException("Failed to get operation status: " + response.statusCode() + " - " + response.body());
+                    }
+
+                    String status = extractStatusFromResponse(response.body());
+
+                    // Get acceptable states
+                    java.util.List<String> acceptableStates = getAcceptableStates(runContext);
+
+                    if (acceptableStates.contains(status)) {
+                        return new OperationResult(status, extractRowCountFromResponse(response.body()));
+                    } else if ("ERROR".equals(status) || "CANCELED".equals(status)) {
+                        throw new RuntimeException("Operation failed with status: " + status + " - " + response.body());
+                    }
+
+                    // Return null to continue polling
+                    return null;
+                }
+            );
+        } catch (Exception e) {
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
             }
-
-            String status = extractStatusFromResponse(response.body());
-
-            // Get acceptable states
-            java.util.List<String> acceptableStates = getAcceptableStates(runContext);
-
-            if (acceptableStates.contains(status)) {
-                return new OperationResult(status, extractRowCountFromResponse(response.body()));
-            } else if ("ERROR".equals(status) || "CANCELED".equals(status)) {
-                throw new RuntimeException("Operation failed with status: " + status + " - " + response.body());
+            if (e instanceof IOException) {
+                throw (IOException) e;
             }
-
-            // Check timeout
-            if (System.currentTimeMillis() - startTime > timeout * 1000L) {
-                throw new RuntimeException("Operation timed out after " + timeout + " seconds");
+            if (e instanceof InterruptedException) {
+                throw (InterruptedException) e;
             }
-
-            // Wait before next check
-            Thread.sleep(1000);
+            throw new RuntimeException("Operation monitoring failed", e);
         }
     }
 

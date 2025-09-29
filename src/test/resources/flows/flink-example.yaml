@@ -2,18 +2,18 @@ id: flink-example
 namespace: io.kestra.plugin.flink
 
 tasks:
-- id: submit-flink-job
-  type: io.kestra.plugin.flink.Submit
-  restUrl: "http://flink-jobmanager:8081"
-  jarUri: "s3://flink/jars/example-job.jar"
-  entryClass: "com.example.Main"
-  args:
-    - "--input"
-    - "s3://input/data/"
-  parallelism: 2
+  - id: submit-flink-job
+    type: io.kestra.plugin.flink.Submit
+    restUrl: "http://flink-jobmanager:8081"
+    jarUri: "s3://flink/jars/example-job.jar"
+    entryClass: "com.example.Main"
+    args:
+      - "--input"
+      - "s3://input/data/"
+    parallelism: 2
 
-- id: monitor-job
-  type: io.kestra.plugin.flink.MonitorJob
-  restUrl: "http://flink-jobmanager:8081"
-  jobId: "{{ outputs.submit-flink-job.jobId }}"
-  waitTimeout: "PT30M"
+  - id: monitor-job
+    type: io.kestra.plugin.flink.MonitorJob
+    restUrl: "http://flink-jobmanager:8081"
+    jobId: "{{ outputs.submit-flink-job.jobId }}"
+    waitTimeout: "PT30M"

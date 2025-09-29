@@ -12,6 +12,8 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
+import io.kestra.core.utils.RetryUtils;
+import io.kestra.core.models.tasks.retrys.Exponential;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -141,7 +143,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             .jobId(renderedJobId)
             .savepointPath(savepointPath)
             .requestId(requestId)
-            .success(true)
             .build();
     }
 
@@ -185,39 +186,58 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
                                             String jobId, String requestId) throws Exception {
 
         int timeoutSeconds = runContext.render(savepointTimeout).as(Integer.class).orElse(300);
-        long startTime = System.currentTimeMillis();
+        int maxAttempts = timeoutSeconds / 5; // Check every 5 seconds
 
-        while (true) {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
-                .timeout(Duration.ofSeconds(30))
-                .GET()
-                .build();
+        return new RetryUtils().<String, Exception>of(
+            Exponential.builder()
+                .delayFactor(1.0) // Fixed interval
+                .interval(Duration.ofSeconds(5))
+                .maxInterval(Duration.ofSeconds(5))
+                .maxAttempts(maxAttempts)
+                .build()
+        ).run(
+            (result, throwable) -> {
+                // Don't retry if we got a successful result
+                if (result != null) {
+                    return false;
+                }
+                // Don't retry on fatal exceptions
+                if (throwable instanceof RuntimeException) {
+                    String message = throwable.getMessage();
+                    if (message != null && (message.contains("Savepoint failed:") || message.contains("Failed to check savepoint status:"))) {
+                        return false;
+                    }
+                }
+                // Retry on other cases
+                return true;
+            },
+            () -> {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Failed to check savepoint status: " + response.statusCode() + " - " + response.body());
+                if (response.statusCode() != 200) {
+                    throw new RuntimeException("Failed to check savepoint status: " + response.statusCode() + " - " + response.body());
+                }
+
+                String status = extractSavepointStatusFromResponse(response.body());
+                runContext.logger().debug("Savepoint status: {}", status);
+
+                if ("COMPLETED".equals(status)) {
+                    return extractSavepointPathFromResponse(response.body());
+                } else if ("FAILED".equals(status)) {
+                    String error = extractSavepointErrorFromResponse(response.body());
+                    throw new RuntimeException("Savepoint failed: " + error);
+                }
+
+                // Return null to continue polling
+                return null;
             }
-
-            String status = extractSavepointStatusFromResponse(response.body());
-            runContext.logger().debug("Savepoint status: {}", status);
-
-            if ("COMPLETED".equals(status)) {
-                return extractSavepointPathFromResponse(response.body());
-            } else if ("FAILED".equals(status)) {
-                String error = extractSavepointErrorFromResponse(response.body());
-                throw new RuntimeException("Savepoint failed: " + error);
-            }
-
-            // Check timeout
-            if (System.currentTimeMillis() - startTime > timeoutSeconds * 1000L) {
-                throw new RuntimeException("Savepoint timed out after " + timeoutSeconds + " seconds");
-            }
-
-            // Wait before next check
-            Thread.sleep(5000); // Check every 5 seconds
-        }
+        );
     }
 
     private String extractRequestIdFromResponse(String responseBody) {
@@ -299,11 +319,5 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             description = "The savepoint request ID"
         )
         private final String requestId;
-
-        @Schema(
-            title = "Success",
-            description = "Whether the savepoint was created successfully"
-        )
-        private final Boolean success;
     }
 }

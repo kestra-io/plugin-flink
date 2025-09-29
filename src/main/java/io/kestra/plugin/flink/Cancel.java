@@ -11,6 +11,8 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
+import io.kestra.core.utils.RetryUtils;
+import io.kestra.core.models.tasks.retrys.Exponential;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -114,12 +116,12 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
     public Cancel.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String renderedRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
-        String renderedJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
+        String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
+        String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean withSp = runContext.render(this.withSavepoint).as(Boolean.class).orElse(false);
         Boolean drain = runContext.render(this.drainJob).as(Boolean.class).orElse(false);
 
-        logger.info("Cancelling Flink job: {} (withSavepoint: {}, drain: {})", renderedJobId, withSp, drain);
+        logger.info("Cancelling Flink job: {} (withSavepoint: {}, drain: {})", rJobId, withSp, drain);
 
         HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -129,23 +131,22 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
 
         if (withSp) {
             // Trigger savepoint before cancellation
-            savepointPath = triggerSavepoint(runContext, client, renderedRestUrl, renderedJobId);
+            savepointPath = triggerSavepoint(runContext, client, rRestUrl, rJobId);
             logger.info("Savepoint created at: {}", savepointPath);
         }
 
         // Cancel the job
-        String cancellationResult = cancelJob(runContext, client, renderedRestUrl, renderedJobId, drain);
+        String cancellationResult = cancelJob(runContext, client, rRestUrl, rJobId, drain);
 
         // Wait for job to be canceled
-        waitForJobCancellation(runContext, client, renderedRestUrl, renderedJobId);
+        waitForJobCancellation(runContext, client, rRestUrl, rJobId);
 
-        logger.info("Successfully cancelled job: {}", renderedJobId);
+        logger.info("Successfully cancelled job: {}", rJobId);
 
         return Output.builder()
-            .jobId(renderedJobId)
+            .jobId(rJobId)
             .savepointPath(savepointPath)
             .cancellationResult(cancellationResult)
-            .success(true)
             .build();
     }
 
@@ -216,72 +217,112 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
             throws Exception {
 
         int timeoutSeconds = runContext.render(cancellationTimeout).as(Integer.class).orElse(60);
-        long startTime = System.currentTimeMillis();
+        int maxAttempts = timeoutSeconds / 2; // Check every 2 seconds
 
-        while (true) {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
-                .timeout(Duration.ofSeconds(30))
-                .GET()
-                .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == 404) {
-                // Job not found, likely canceled
-                break;
-            }
-
-            if (response.statusCode() == 200) {
-                String state = extractJobStateFromResponse(response.body());
-                if ("CANCELED".equals(state) || "FINISHED".equals(state)) {
-                    break;
+        new RetryUtils().<Boolean, Exception>of(
+            Exponential.builder()
+                .delayFactor(1.0) // Fixed interval
+                .interval(Duration.ofSeconds(2))
+                .maxInterval(Duration.ofSeconds(2))
+                .maxAttempts(maxAttempts)
+                .build()
+        ).run(
+            (result, throwable) -> {
+                // Don't retry if job is canceled/finished (result = true)
+                if (result != null && result) {
+                    return false;
                 }
-            }
+                // Don't retry on fatal exceptions
+                if (throwable instanceof RuntimeException) {
+                    String message = throwable.getMessage();
+                    if (message != null && message.contains("Job cancellation timed out")) {
+                        return false;
+                    }
+                }
+                // Continue retrying
+                return true;
+            },
+            () -> {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
 
-            // Check timeout
-            if (System.currentTimeMillis() - startTime > timeoutSeconds * 1000L) {
-                throw new RuntimeException("Job cancellation timed out after " + timeoutSeconds + " seconds");
-            }
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            Thread.sleep(2000); // Check every 2 seconds
-        }
+                if (response.statusCode() == 404) {
+                    // Job not found, likely canceled
+                    return true;
+                }
+
+                if (response.statusCode() == 200) {
+                    String state = extractJobStateFromResponse(response.body());
+                    if ("CANCELED".equals(state) || "FINISHED".equals(state)) {
+                        return true;
+                    }
+                }
+
+                // Return null to continue polling
+                return null;
+            }
+        );
     }
 
     private String waitForSavepointCompletion(RunContext runContext, HttpClient client, String restUrl,
                                             String jobId, String requestId) throws Exception {
 
         int timeoutSeconds = 300; // 5 minutes for savepoint
-        long startTime = System.currentTimeMillis();
+        int maxAttempts = timeoutSeconds / 5; // Check every 5 seconds
 
-        while (true) {
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
-                .timeout(Duration.ofSeconds(30))
-                .GET()
-                .build();
+        return new RetryUtils().<String, Exception>of(
+            Exponential.builder()
+                .delayFactor(1.0) // Fixed interval
+                .interval(Duration.ofSeconds(5))
+                .maxInterval(Duration.ofSeconds(5))
+                .maxAttempts(maxAttempts)
+                .build()
+        ).run(
+            (result, throwable) -> {
+                // Don't retry if we got a successful result
+                if (result != null) {
+                    return false;
+                }
+                // Don't retry on fatal exceptions
+                if (throwable instanceof RuntimeException) {
+                    String message = throwable.getMessage();
+                    if (message != null && (message.contains("Savepoint failed:") || message.contains("Failed to check savepoint status:"))) {
+                        return false;
+                    }
+                }
+                // Retry on other cases
+                return true;
+            },
+            () -> {
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
+                    .timeout(Duration.ofSeconds(30))
+                    .GET()
+                    .build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Failed to check savepoint status: " + response.statusCode() + " - " + response.body());
+                if (response.statusCode() != 200) {
+                    throw new RuntimeException("Failed to check savepoint status: " + response.statusCode() + " - " + response.body());
+                }
+
+                String status = extractSavepointStatusFromResponse(response.body());
+                if ("COMPLETED".equals(status)) {
+                    return extractSavepointPathFromResponse(response.body());
+                } else if ("FAILED".equals(status)) {
+                    String error = extractSavepointErrorFromResponse(response.body());
+                    throw new RuntimeException("Savepoint failed: " + error);
+                }
+
+                // Return null to continue polling
+                return null;
             }
-
-            String status = extractSavepointStatusFromResponse(response.body());
-            if ("COMPLETED".equals(status)) {
-                return extractSavepointPathFromResponse(response.body());
-            } else if ("FAILED".equals(status)) {
-                String error = extractSavepointErrorFromResponse(response.body());
-                throw new RuntimeException("Savepoint failed: " + error);
-            }
-
-            // Check timeout
-            if (System.currentTimeMillis() - startTime > timeoutSeconds * 1000L) {
-                throw new RuntimeException("Savepoint timed out after " + timeoutSeconds + " seconds");
-            }
-
-            Thread.sleep(5000); // Check every 5 seconds
-        }
+        );
     }
 
     private String extractRequestIdFromResponse(String responseBody) {
@@ -363,10 +404,5 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         )
         private final String cancellationResult;
 
-        @Schema(
-            title = "Success",
-            description = "Whether the cancellation completed successfully"
-        )
-        private final Boolean success;
     }
 }

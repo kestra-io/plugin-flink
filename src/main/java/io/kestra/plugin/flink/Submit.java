@@ -62,21 +62,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
                       - "s3://output/results/"
                     parallelism: 4
                 """
-        ),
-        @Example(
-            title = "Submit a Flink streaming job with savepoint",
-            code = """
-                id: submit-streaming
-                type: io.kestra.plugin.flink.Submit
-                restUrl: "http://flink-jobmanager:8081"
-                jarUri: "s3://flink/jars/streaming-job.jar"
-                entryClass: "com.example.StreamingMain"
-                args:
-                  - "--kafka-brokers"
-                  - "kafka:9092"
-                parallelism: 2
-                restoreFromSavepoint: "s3://flink/savepoints/latest"
-                """
         )
     }
 )
@@ -149,20 +134,20 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
     public Submit.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String renderedJarUri = runContext.render(this.jarUri).as(String.class).orElseThrow();
-        String renderedEntryClass = runContext.render(this.entryClass).as(String.class).orElseThrow();
-        String renderedRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
+        String rJarUri = runContext.render(this.jarUri).as(String.class).orElseThrow();
+        String rEntryClass = runContext.render(this.entryClass).as(String.class).orElseThrow();
+        String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
 
-        logger.info("Submitting Flink job: {} from {}", renderedEntryClass, renderedJarUri);
+        logger.info("Submitting Flink job: {} from {}", rEntryClass, rJarUri);
 
         // Download JAR if needed
-        URI jarLocation = downloadJar(runContext, renderedJarUri);
+        URI jarLocation = downloadJar(runContext, rJarUri);
 
         // Upload JAR to Flink cluster
-        String jarId = uploadJarToFlink(runContext, renderedRestUrl, jarLocation);
+        String jarId = uploadJarToFlink(runContext, rRestUrl, jarLocation);
 
         // Submit job
-        String jobId = submitJob(runContext, renderedRestUrl, jarId, renderedEntryClass);
+        String jobId = submitJob(runContext, rRestUrl, jarId, rEntryClass);
 
         logger.info("Successfully submitted Flink job with ID: {}", jobId);
 
