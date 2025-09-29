@@ -216,33 +216,33 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
     private void waitForJobCancellation(RunContext runContext, HttpClient client, String restUrl, String jobId)
             throws Exception {
 
-        int timeoutSeconds = runContext.render(cancellationTimeout).as(Integer.class).orElse(60);
-        int maxAttempts = timeoutSeconds / 2; // Check every 2 seconds
+        int timeoutSeconds = Math.max(1, runContext.render(cancellationTimeout).as(Integer.class).orElse(60));
+        final int intervalSec = 2;
+        final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec));
+        final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
         new RetryUtils().<Boolean, Exception>of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
-                .interval(Duration.ofSeconds(2))
-                .maxInterval(Duration.ofSeconds(2))
+                .interval(Duration.ofSeconds(intervalSec))
+                .maxInterval(Duration.ofSeconds(intervalSec))
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
             (result, throwable) -> {
-                // Don't retry if job is canceled/finished (result = true)
-                if (result != null && result) {
+                if (result != null && result) return false;
+                if (throwable instanceof NonRetriableCancellationException ||
+                    throwable instanceof java.util.concurrent.TimeoutException) {
                     return false;
                 }
-                // Don't retry on fatal exceptions
-                if (throwable instanceof RuntimeException) {
-                    String message = throwable.getMessage();
-                    if (message != null && message.contains("Job cancellation timed out")) {
-                        return false;
-                    }
-                }
-                // Continue retrying
-                return true;
+                return true; // retry other exceptions
             },
             () -> {
+                // Hard-stop if global timeout elapsed
+                if (java.time.Instant.now().isAfter(deadline)) {
+                    throw new java.util.concurrent.TimeoutException("Job cancellation timed out after " + timeoutSeconds + " seconds");
+                }
+
                 HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
                     .timeout(Duration.ofSeconds(30))
@@ -256,11 +256,17 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
                     return true;
                 }
 
-                if (response.statusCode() == 200) {
+                int statusCode = response.statusCode();
+                if (statusCode == 200) {
                     String state = extractJobStateFromResponse(response.body());
-                    if ("CANCELED".equals(state) || "FINISHED".equals(state)) {
+                    if ("FINISHED".equals(state) || "FAILED".equals(state) || "CANCELED".equals(state)) {
                         return true;
                     }
+                } else if (statusCode >= 500 || statusCode == 429) {
+                    runContext.logger().warn("Transient status {} from Flink; will retry. Body: {}", statusCode, response.body());
+                    return null; // keep polling
+                } else {
+                    throw new NonRetriableCancellationException("Failed to check job status: " + statusCode + " - " + response.body());
                 }
 
                 // Return null to continue polling
@@ -404,5 +410,13 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
         )
         private final String cancellationResult;
 
+    }
+
+    private static final class NonRetriableCancellationException extends RuntimeException {
+        NonRetriableCancellationException(String message) { super(message); }
+    }
+
+    private static final class NonRetriableSavepointException extends RuntimeException {
+        NonRetriableSavepointException(String message) { super(message); }
     }
 }

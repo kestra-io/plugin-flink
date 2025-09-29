@@ -287,34 +287,34 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             .connectTimeout(Duration.ofSeconds(30))
             .build();
 
-        int timeout = runContext.render(statementTimeout).as(Integer.class).orElse(300);
-        int maxAttempts = timeout; // Check every 1 second
+        int timeout = Math.max(1, runContext.render(statementTimeout).as(Integer.class).orElse(300));
+        final int intervalSec = 1;
+        final int maxAttempts = Math.max(1, timeout); // Check every 1 second
+        final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeout);
 
         try {
             return new RetryUtils().<OperationResult, Exception>of(
                 Exponential.builder()
                     .delayFactor(1.0) // Fixed interval
-                    .interval(Duration.ofSeconds(1))
-                    .maxInterval(Duration.ofSeconds(1))
+                    .interval(Duration.ofSeconds(intervalSec))
+                    .maxInterval(Duration.ofSeconds(intervalSec))
                     .maxAttempts(maxAttempts)
                     .build()
             ).run(
                 (result, throwable) -> {
-                    // Don't retry if we got a successful result
-                    if (result != null) {
+                    if (result != null) return false;
+                    if (throwable instanceof NonRetriableOperationException ||
+                        throwable instanceof java.util.concurrent.TimeoutException) {
                         return false;
                     }
-                    // Don't retry on fatal exceptions
-                    if (throwable instanceof RuntimeException) {
-                        String message = throwable.getMessage();
-                        if (message != null && (message.contains("Operation failed with status:") || message.contains("Failed to get operation status:"))) {
-                            return false;
-                        }
-                    }
-                    // Retry on other cases
-                    return true;
+                    return true; // retry other exceptions
                 },
                 () -> {
+                    // Hard-stop if global timeout elapsed
+                    if (java.time.Instant.now().isAfter(deadline)) {
+                        throw new java.util.concurrent.TimeoutException("Operation timed out after " + timeout + " seconds");
+                    }
+
                     HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle + "/operations/" + operationHandle + "/status"))
                         .timeout(Duration.ofSeconds(30))
@@ -323,8 +323,13 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
                     HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-                    if (response.statusCode() != 200) {
-                        throw new RuntimeException("Failed to get operation status: " + response.statusCode() + " - " + response.body());
+                    int statusCode = response.statusCode();
+                    if (statusCode != 200) {
+                        if (statusCode >= 500 || statusCode == 429) {
+                            runContext.logger().warn("Transient status {} from Flink SQL Gateway; will retry. Body: {}", statusCode, response.body());
+                            return null; // keep polling
+                        }
+                        throw new NonRetriableOperationException("Failed to get operation status: " + statusCode + " - " + response.body());
                     }
 
                     String status = extractStatusFromResponse(response.body());
@@ -335,7 +340,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
                     if (acceptableStates.contains(status)) {
                         return new OperationResult(status, extractRowCountFromResponse(response.body()));
                     } else if ("ERROR".equals(status) || "CANCELED".equals(status)) {
-                        throw new RuntimeException("Operation failed with status: " + status + " - " + response.body());
+                        throw new NonRetriableOperationException("Operation failed with status: " + status + " - " + response.body());
                     }
 
                     // Return null to continue polling
@@ -495,5 +500,9 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             description = "Final status of the operation"
         )
         private final String status;
+    }
+
+    private static final class NonRetriableOperationException extends RuntimeException {
+        NonRetriableOperationException(String message) { super(message); }
     }
 }

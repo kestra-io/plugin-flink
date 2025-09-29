@@ -142,7 +142,14 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                     logger.info("Job {} reached terminal state: {} (success: {})", rJobId, status.getState(), isSuccess);
                 }
 
-                // Create execution with job status information
+                // Create execution with job status information and trigger outputs
+                Map<String, Object> triggerOutputs = Map.of(
+                    "jobId", rJobId,
+                    "finalState", status.getState(),
+                    "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
+                    "success", isSuccess
+                );
+
                 return Optional.of(Execution.builder()
                     .id(IdUtils.create())
                     .namespace(conditionContext.getFlow().getNamespace())
@@ -155,6 +162,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                         "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
                         "success", isSuccess
                     ))
+                    .outputs(triggerOutputs)
                     .build());
             }
 

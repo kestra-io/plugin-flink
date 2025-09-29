@@ -185,33 +185,33 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     private String waitForSavepointCompletion(RunContext runContext, HttpClient client, String restUrl,
                                             String jobId, String requestId) throws Exception {
 
-        int timeoutSeconds = runContext.render(savepointTimeout).as(Integer.class).orElse(300);
-        int maxAttempts = timeoutSeconds / 5; // Check every 5 seconds
+        int timeoutSeconds = Math.max(1, runContext.render(savepointTimeout).as(Integer.class).orElse(300));
+        final int intervalSec = 5;
+        final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
+        final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
         return new RetryUtils().<String, Exception>of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
-                .interval(Duration.ofSeconds(5))
-                .maxInterval(Duration.ofSeconds(5))
+                .interval(Duration.ofSeconds(intervalSec))
+                .maxInterval(Duration.ofSeconds(intervalSec))
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
             (result, throwable) -> {
-                // Don't retry if we got a successful result
-                if (result != null) {
+                if (result != null) return false;
+                if (throwable instanceof NonRetriableSavepointException ||
+                    throwable instanceof java.util.concurrent.TimeoutException) {
                     return false;
                 }
-                // Don't retry on fatal exceptions
-                if (throwable instanceof RuntimeException) {
-                    String message = throwable.getMessage();
-                    if (message != null && (message.contains("Savepoint failed:") || message.contains("Failed to check savepoint status:"))) {
-                        return false;
-                    }
-                }
-                // Retry on other cases
-                return true;
+                return true; // retry other exceptions (I/O, timeouts, transient HTTP)
             },
             () -> {
+                // Hard-stop if global timeout elapsed (enforces wall-clock budget)
+                if (java.time.Instant.now().isAfter(deadline)) {
+                    throw new java.util.concurrent.TimeoutException("Timed out waiting for savepoint completion after " + timeoutSeconds + "s");
+                }
+
                 HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
                     .timeout(Duration.ofSeconds(30))
@@ -220,8 +220,13 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
 
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-                if (response.statusCode() != 200) {
-                    throw new RuntimeException("Failed to check savepoint status: " + response.statusCode() + " - " + response.body());
+                int statusCode = response.statusCode();
+                if (statusCode != 200) {
+                    if (statusCode >= 500 || statusCode == 429) {
+                        runContext.logger().warn("Transient status {} from Flink; will retry. Body: {}", statusCode, response.body());
+                        return null; // keep polling
+                    }
+                    throw new NonRetriableSavepointException("Failed to check savepoint status: " + statusCode + " - " + response.body());
                 }
 
                 String status = extractSavepointStatusFromResponse(response.body());
@@ -231,7 +236,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
                     return extractSavepointPathFromResponse(response.body());
                 } else if ("FAILED".equals(status)) {
                     String error = extractSavepointErrorFromResponse(response.body());
-                    throw new RuntimeException("Savepoint failed: " + error);
+                    throw new NonRetriableSavepointException("Savepoint failed: " + error);
                 }
 
                 // Return null to continue polling
@@ -297,6 +302,10 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             throw new RuntimeException("Failed to parse savepoint status response: " + responseBody, e);
         }
         return "Unknown error";
+    }
+
+    private static final class NonRetriableSavepointException extends RuntimeException {
+        NonRetriableSavepointException(String message) { super(message); }
     }
 
     @Builder
