@@ -18,11 +18,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.serializers.JacksonMapper;
 import jakarta.validation.constraints.NotNull;
-import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
 import java.time.Duration;
 
 @SuperBuilder
@@ -123,8 +122,8 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
 
         logger.info("Cancelling Flink job: {} (withSavepoint: {}, drain: {})", rJobId, withSp, drain);
 
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
+        HttpClient client = HttpClient.builder()
+            .runContext(runContext)
             .build();
 
         String savepointPath = null;
@@ -164,50 +163,54 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
 
         String payload = "{\"targetDirectory\":\"" + savepointDirectory + "\",\"cancelJob\":false}";
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest request = HttpRequest.builder()
             .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints"))
-            .timeout(Duration.ofMinutes(10))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(payload))
+            .method("POST")
+            .addHeader("Content-Type", "application/json")
+            .body(HttpRequest.StringRequestBody.builder()
+                .content(payload)
+                .build())
             .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() != 202) {
-            throw new RuntimeException("Failed to trigger savepoint: " + response.statusCode() + " - " + response.body());
+        if (response.getStatus().getCode() != 202) {
+            throw new RuntimeException("Failed to trigger savepoint: " + response.getStatus().getCode() + " - " + response.getBody());
         }
 
         // Extract request ID and wait for completion
-        String requestId = extractRequestIdFromResponse(response.body());
+        String requestId = extractRequestIdFromResponse(response.getBody());
         return waitForSavepointCompletion(runContext, client, restUrl, jobId, requestId);
     }
 
     private String cancelJob(RunContext runContext, HttpClient client, String restUrl, String jobId, boolean drain)
-            throws IOException, InterruptedException {
+            throws Exception {
 
         String endpoint = drain ? "/v1/jobs/" + jobId + "/stop" : "/v1/jobs/" + jobId;
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-            .uri(URI.create(restUrl + endpoint))
-            .timeout(Duration.ofSeconds(60));
 
         HttpRequest request;
         if (drain) {
             // For drain, we need to POST with stop request
-            request = requestBuilder
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString("{\"drain\":true}"))
+            request = HttpRequest.builder()
+                .uri(URI.create(restUrl + endpoint))
+                .method("POST")
+                .addHeader("Content-Type", "application/json")
+                .body(HttpRequest.StringRequestBody.builder()
+                    .content("{\"drain\":true}")
+                    .build())
                 .build();
         } else {
             // For regular cancel, we DELETE
-            request = requestBuilder
-                .DELETE()
+            request = HttpRequest.builder()
+                .uri(URI.create(restUrl + endpoint))
+                .method("DELETE")
                 .build();
         }
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() != 202) {
-            throw new RuntimeException("Failed to cancel job: " + response.statusCode() + " - " + response.body());
+        if (response.getStatus().getCode() != 202) {
+            throw new RuntimeException("Failed to cancel job: " + response.getStatus().getCode() + " - " + response.getBody());
         }
 
         return drain ? "Job stop requested (drain mode)" : "Job cancellation requested";
@@ -243,30 +246,29 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
                     throw new java.util.concurrent.TimeoutException("Job cancellation timed out after " + timeoutSeconds + " seconds");
                 }
 
-                HttpRequest request = HttpRequest.newBuilder()
+                HttpRequest request = HttpRequest.builder()
                     .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
-                    .timeout(Duration.ofSeconds(30))
-                    .GET()
+                    .method("GET")
                     .build();
 
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = client.request(request, String.class);
 
-                if (response.statusCode() == 404) {
+                if (response.getStatus().getCode() == 404) {
                     // Job not found, likely canceled
                     return true;
                 }
 
-                int statusCode = response.statusCode();
+                int statusCode = response.getStatus().getCode();
                 if (statusCode == 200) {
-                    String state = extractJobStateFromResponse(response.body());
+                    String state = extractJobStateFromResponse(response.getBody());
                     if ("FINISHED".equals(state) || "FAILED".equals(state) || "CANCELED".equals(state)) {
                         return true;
                     }
                 } else if (statusCode >= 500 || statusCode == 429) {
-                    runContext.logger().warn("Transient status {} from Flink; will retry. Body: {}", statusCode, response.body());
+                    runContext.logger().warn("Transient status {} from Flink; will retry. Body: {}", statusCode, response.getBody());
                     return null; // keep polling
                 } else {
-                    throw new NonRetriableCancellationException("Failed to check job status: " + statusCode + " - " + response.body());
+                    throw new NonRetriableCancellationException("Failed to check job status: " + statusCode + " - " + response.getBody());
                 }
 
                 // Return null to continue polling
@@ -305,23 +307,22 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
                 return true;
             },
             () -> {
-                HttpRequest request = HttpRequest.newBuilder()
+                HttpRequest request = HttpRequest.builder()
                     .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
-                    .timeout(Duration.ofSeconds(30))
-                    .GET()
+                    .method("GET")
                     .build();
 
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response = client.request(request, String.class);
 
-                if (response.statusCode() != 200) {
-                    throw new RuntimeException("Failed to check savepoint status: " + response.statusCode() + " - " + response.body());
+                if (response.getStatus().getCode() != 200) {
+                    throw new RuntimeException("Failed to check savepoint status: " + response.getStatus().getCode() + " - " + response.getBody());
                 }
 
-                String status = extractSavepointStatusFromResponse(response.body());
+                String status = extractSavepointStatusFromResponse(response.getBody());
                 if ("COMPLETED".equals(status)) {
-                    return extractSavepointPathFromResponse(response.body());
+                    return extractSavepointPathFromResponse(response.getBody());
                 } else if ("FAILED".equals(status)) {
-                    String error = extractSavepointErrorFromResponse(response.body());
+                    String error = extractSavepointErrorFromResponse(response.getBody());
                     throw new RuntimeException("Savepoint failed: " + error);
                 }
 

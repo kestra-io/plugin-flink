@@ -21,11 +21,10 @@ import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
 import jakarta.validation.constraints.NotNull;
-import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
 import java.time.Duration;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -124,8 +123,8 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         logger.debug("Polling Flink job status: {}", rJobId);
 
         try {
-            HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
+            HttpClient client = HttpClient.builder()
+                .runContext(runContext)
                 .build();
 
             JobStatus status = getJobStatus(client, rRestUrl, rJobId);
@@ -183,25 +182,24 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     }
 
     private JobStatus getJobStatus(HttpClient client, String restUrl, String jobId)
-            throws IOException, InterruptedException {
+            throws Exception {
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest request = HttpRequest.builder()
             .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
-            .timeout(Duration.ofSeconds(30))
-            .GET()
+            .method("GET")
             .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() == 404) {
+        if (response.getStatus().getCode() == 404) {
             throw new RuntimeException("Job not found: " + jobId);
         }
 
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to get job status: " + response.statusCode() + " - " + response.body());
+        if (response.getStatus().getCode() != 200) {
+            throw new RuntimeException("Failed to get job status: " + response.getStatus().getCode() + " - " + response.getBody());
         }
 
-        return parseJobStatus(response.body());
+        return parseJobStatus(response.getBody());
     }
 
     private JobStatus parseJobStatus(String responseBody) {

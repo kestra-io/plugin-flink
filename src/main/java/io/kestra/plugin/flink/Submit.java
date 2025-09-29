@@ -17,11 +17,10 @@ import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -170,54 +169,59 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         }
     }
 
-    private String uploadJarToFlink(RunContext runContext, String restUrl, URI jarLocation) throws IOException, InterruptedException {
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private String uploadJarToFlink(RunContext runContext, String restUrl, URI jarLocation) throws Exception {
+        try (HttpClient client = HttpClient.builder()
+                .runContext(runContext)
+                .build()) {
+            java.nio.file.Path jarPath = java.nio.file.Path.of(jarLocation);
+            String fileName = jarPath.getFileName().toString();
 
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-            .uri(URI.create(restUrl + "/v1/jars/upload"))
-            .timeout(Duration.ofMinutes(5));
+            // Create multipart request body for JAR upload
+            String boundary = "----FlinkJarUpload" + System.currentTimeMillis();
+            String prefix = "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"jarfile\"; filename=\"" + fileName + "\"\r\n"
+                + "Content-Type: application/java-archive\r\n\r\n";
+            String suffix = "\r\n--" + boundary + "--\r\n";
 
-        // Create multipart request body for JAR upload
-        String boundary = "----FlinkJarUpload" + System.currentTimeMillis();
-        java.nio.file.Path jarPath = java.nio.file.Path.of(jarLocation);
-        String fileName = jarPath.getFileName().toString();
-        String prefix = "--" + boundary + "\r\n"
-            + "Content-Disposition: form-data; name=\"jarfile\"; filename=\"" + fileName + "\"\r\n"
-            + "Content-Type: application/java-archive\r\n\r\n";
-        String suffix = "\r\n--" + boundary + "--\r\n";
+            // Read jar file content and create full body
+            byte[] jarContent = java.nio.file.Files.readAllBytes(jarPath);
+            byte[] prefixBytes = prefix.getBytes(StandardCharsets.UTF_8);
+            byte[] suffixBytes = suffix.getBytes(StandardCharsets.UTF_8);
 
-        HttpRequest.BodyPublisher bodyPublisher = HttpRequest.BodyPublishers.concat(
-            HttpRequest.BodyPublishers.ofByteArray(prefix.getBytes(StandardCharsets.UTF_8)),
-            HttpRequest.BodyPublishers.ofFile(jarPath),
-            HttpRequest.BodyPublishers.ofByteArray(suffix.getBytes(StandardCharsets.UTF_8))
-        );
+            byte[] fullBody = new byte[prefixBytes.length + jarContent.length + suffixBytes.length];
+            System.arraycopy(prefixBytes, 0, fullBody, 0, prefixBytes.length);
+            System.arraycopy(jarContent, 0, fullBody, prefixBytes.length, jarContent.length);
+            System.arraycopy(suffixBytes, 0, fullBody, prefixBytes.length + jarContent.length, suffixBytes.length);
 
-        HttpRequest request = requestBuilder
-            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-            .POST(bodyPublisher)
-            .build();
+            HttpRequest request = HttpRequest.builder()
+                .uri(URI.create(restUrl + "/v1/jars/upload"))
+                .method("POST")
+                .addHeader("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .body(HttpRequest.ByteArrayRequestBody.builder()
+                    .content(fullBody)
+                    .build())
+                .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to upload JAR: " + response.statusCode() + " - " + response.body());
+            if (response.getStatus().getCode() != 200) {
+                throw new RuntimeException("Failed to upload JAR: " + response.getStatus().getCode() + " - " + response.getBody());
+            }
+
+            // Parse response to get JAR ID
+            // Expected response format: {"filename": "...", "status": "success"}
+            String responseBody = response.getBody();
+            String jarId = extractJarIdFromResponse(responseBody);
+
+            runContext.logger().info("Uploaded JAR with ID: {}", jarId);
+            return jarId;
         }
-
-        // Parse response to get JAR ID
-        // Expected response format: {"filename": "...", "status": "success"}
-        String responseBody = response.body();
-        String jarId = extractJarIdFromResponse(responseBody);
-
-        runContext.logger().info("Uploaded JAR with ID: {}", jarId);
-        return jarId;
     }
 
-    private String submitJob(RunContext runContext, String restUrl, String jarId, String entryClass) throws IOException, InterruptedException, IllegalVariableEvaluationException {
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private String submitJob(RunContext runContext, String restUrl, String jarId, String entryClass) throws Exception {
+        try (HttpClient client = HttpClient.builder()
+                .runContext(runContext)
+                .build()) {
 
         // Build job submission payload
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -256,22 +260,25 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         ObjectMapper mapper = new ObjectMapper();
         String requestBody = mapper.writeValueAsString(payload);
 
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(restUrl + "/v1/jars/" + jarId + "/run"))
-            .timeout(Duration.ofMinutes(2))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-            .build();
+            HttpRequest request = HttpRequest.builder()
+                .uri(URI.create(restUrl + "/v1/jars/" + jarId + "/run"))
+                .method("POST")
+                .addHeader("Content-Type", "application/json")
+                .body(HttpRequest.StringRequestBody.builder()
+                    .content(requestBody)
+                    .build())
+                .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to submit job: " + response.statusCode() + " - " + response.body());
+            if (response.getStatus().getCode() != 200) {
+                throw new RuntimeException("Failed to submit job: " + response.getStatus().getCode() + " - " + response.getBody());
+            }
+
+            // Extract job ID from response
+            String jobId = extractJobIdFromResponse(response.getBody());
+            return jobId;
         }
-
-        // Extract job ID from response
-        String jobId = extractJobIdFromResponse(response.body());
-        return jobId;
     }
 
     private String extractJarIdFromResponse(String responseBody) {

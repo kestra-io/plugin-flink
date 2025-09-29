@@ -22,9 +22,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.client.HttpClientException;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
 
@@ -187,10 +188,10 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     }
 
     private String createOrGetSession(RunContext runContext, String gatewayUrl)
-            throws IOException, InterruptedException, IllegalVariableEvaluationException {
+            throws Exception {
 
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(runContext.render(connectionTimeout).as(Integer.class).orElse(30)))
+        HttpClient client = HttpClient.builder()
+            .runContext(runContext)
             .build();
 
         String sessionName = this.sessionName != null ?
@@ -198,15 +199,14 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
         if (sessionName != null) {
             // List existing sessions to find one with matching name
-            HttpRequest listRequest = HttpRequest.newBuilder()
+            HttpRequest listRequest = HttpRequest.builder()
                 .uri(URI.create(gatewayUrl + "/v1/sessions"))
-                .timeout(Duration.ofSeconds(30))
-                .GET()
+                .method("GET")
                 .build();
 
-            HttpResponse<String> listResponse = client.send(listRequest, HttpResponse.BodyHandlers.ofString());
-            if (listResponse.statusCode() == 200) {
-                String existingSessionHandle = findSessionByName(listResponse.body(), sessionName);
+            HttpResponse<String> listResponse = client.request(listRequest, String.class);
+            if (listResponse.getStatus().getCode() == 200) {
+                String existingSessionHandle = findSessionByName(listResponse.getBody(), sessionName);
                 if (existingSessionHandle != null) {
                     runContext.logger().info("Using existing session: {} (handle: {})", sessionName, existingSessionHandle);
                     return existingSessionHandle;
@@ -235,56 +235,60 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             }
         }
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest request = HttpRequest.builder()
             .uri(URI.create(gatewayUrl + "/v1/sessions"))
-            .timeout(Duration.ofSeconds(30))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(payload)))
+            .method("POST")
+            .addHeader("Content-Type", "application/json")
+            .body(HttpRequest.StringRequestBody.builder()
+                .content(JSON.writeValueAsString(payload))
+                .build())
             .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to create session: " + response.statusCode() + " - " + response.body());
+        if (response.getStatus().getCode() != 200) {
+            throw new RuntimeException("Failed to create session: " + response.getStatus().getCode() + " - " + response.getBody());
         }
 
         // Extract session handle from response
-        String sessionHandle = extractSessionHandleFromResponse(response.body());
+        String sessionHandle = extractSessionHandleFromResponse(response.getBody());
         runContext.logger().info("Created new session: {}", sessionHandle);
         return sessionHandle;
     }
 
     private String executeStatement(RunContext runContext, String gatewayUrl, String sessionHandle, String statement)
-            throws IOException, InterruptedException, IllegalVariableEvaluationException {
+            throws Exception {
 
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
+        HttpClient client = HttpClient.builder()
+            .runContext(runContext)
             .build();
 
         ObjectNode payload = JSON.createObjectNode().put("statement", statement);
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest request = HttpRequest.builder()
             .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle + "/statements"))
-            .timeout(Duration.ofSeconds(runContext.render(statementTimeout).as(Integer.class).orElse(300)))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(payload)))
+            .method("POST")
+            .addHeader("Content-Type", "application/json")
+            .body(HttpRequest.StringRequestBody.builder()
+                .content(JSON.writeValueAsString(payload))
+                .build())
             .build();
 
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.request(request, String.class);
 
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to execute statement: " + response.statusCode() + " - " + response.body());
+        if (response.getStatus().getCode() != 200) {
+            throw new RuntimeException("Failed to execute statement: " + response.getStatus().getCode() + " - " + response.getBody());
         }
 
-        return extractOperationHandleFromResponse(response.body());
+        return extractOperationHandleFromResponse(response.getBody());
     }
 
     private OperationResult waitForOperationCompletion(RunContext runContext, String gatewayUrl,
                                                        String sessionHandle, String operationHandle)
             throws IOException, InterruptedException, IllegalVariableEvaluationException {
 
-        HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
+        HttpClient client = HttpClient.builder()
+            .runContext(runContext)
             .build();
 
         int timeout = Math.max(1, runContext.render(statementTimeout).as(Integer.class).orElse(300));
@@ -315,32 +319,31 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
                         throw new java.util.concurrent.TimeoutException("Operation timed out after " + timeout + " seconds");
                     }
 
-                    HttpRequest request = HttpRequest.newBuilder()
+                    HttpRequest request = HttpRequest.builder()
                         .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle + "/operations/" + operationHandle + "/status"))
-                        .timeout(Duration.ofSeconds(30))
-                        .GET()
+                        .method("GET")
                         .build();
 
-                    HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                    HttpResponse<String> response = client.request(request, String.class);
 
-                    int statusCode = response.statusCode();
+                    int statusCode = response.getStatus().getCode();
                     if (statusCode != 200) {
                         if (statusCode >= 500 || statusCode == 429) {
-                            runContext.logger().warn("Transient status {} from Flink SQL Gateway; will retry. Body: {}", statusCode, response.body());
+                            runContext.logger().warn("Transient status {} from Flink SQL Gateway; will retry. Body: {}", statusCode, response.getBody());
                             return null; // keep polling
                         }
-                        throw new NonRetriableOperationException("Failed to get operation status: " + statusCode + " - " + response.body());
+                        throw new NonRetriableOperationException("Failed to get operation status: " + statusCode + " - " + response.getBody());
                     }
 
-                    String status = extractStatusFromResponse(response.body());
+                    String status = extractStatusFromResponse(response.getBody());
 
                     // Get acceptable states
                     java.util.List<String> acceptableStates = getAcceptableStates(runContext);
 
                     if (acceptableStates.contains(status)) {
-                        return new OperationResult(status, extractRowCountFromResponse(response.body()));
+                        return new OperationResult(status, extractRowCountFromResponse(response.getBody()));
                     } else if ("ERROR".equals(status) || "CANCELED".equals(status)) {
-                        throw new NonRetriableOperationException("Operation failed with status: " + status + " - " + response.body());
+                        throw new NonRetriableOperationException("Operation failed with status: " + status + " - " + response.getBody());
                     }
 
                     // Return null to continue polling
@@ -363,17 +366,16 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     private void closeSession(RunContext runContext, String gatewayUrl, String sessionHandle) {
         try {
-            HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
+            HttpClient client = HttpClient.builder()
+                .runContext(runContext)
                 .build();
 
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest request = HttpRequest.builder()
                 .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle))
-                .timeout(Duration.ofSeconds(30))
-                .DELETE()
+                .method("DELETE")
                 .build();
 
-            client.send(request, HttpResponse.BodyHandlers.ofString());
+            client.request(request, String.class);
             runContext.logger().info("Closed session: {}", sessionHandle);
         } catch (Exception e) {
             runContext.logger().warn("Failed to close session: {}", sessionHandle, e);
