@@ -3,7 +3,6 @@ package io.kestra.plugin.flink;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
@@ -23,7 +22,6 @@ import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.net.URI;
 import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.client.HttpClientException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import java.time.Duration;
@@ -67,21 +65,26 @@ import java.util.Map;
         ),
         @Example(
             title = "Execute a batch SQL query",
+            full = true,
             code = """
-                id: run-batch-sql
-                type: io.kestra.plugin.flink.SubmitSql
-                gatewayUrl: "http://flink-sql-gateway:8083"
-                statement: |
-                  CREATE TABLE daily_summary AS
-                  SELECT DATE(order_time) as order_date,
-                         COUNT(*) as order_count,
-                         SUM(amount) as total_amount
-                  FROM orders
-                  WHERE order_time >= '2024-01-01'
-                  GROUP BY DATE(order_time)
-                sessionConfig:
-                  configuration:
-                    execution.runtime-mode: "batch"
+                id: flink-sql-batch
+                namespace: company.team
+
+                tasks:
+                  - id: run-batch-sql
+                    type: io.kestra.plugin.flink.SubmitSql
+                    gatewayUrl: "http://flink-sql-gateway:8083"
+                    statement: |
+                      CREATE TABLE daily_summary AS
+                      SELECT DATE(order_time) as order_date,
+                             COUNT(*) as order_count,
+                             SUM(amount) as total_amount
+                      FROM orders
+                      WHERE order_time >= '2024-01-01'
+                      GROUP BY DATE(order_time)
+                    sessionConfig:
+                      configuration:
+                        execution.runtime-mode: "batch"
                 """
         )
     }
@@ -94,7 +97,6 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         title = "SQL Gateway URL",
         description = "The base URL of the Flink SQL Gateway, e.g., 'http://flink-sql-gateway:8083'"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> gatewayUrl;
 
@@ -102,7 +104,6 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         title = "SQL statement",
         description = "The SQL statement to execute. Supports both DDL and DML statements."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> statement;
 
@@ -110,21 +111,18 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         title = "Session name",
         description = "Optional session name. If not provided, a random session will be created."
     )
-    @PluginProperty(dynamic = true)
     private Property<String> sessionName;
 
     @Schema(
         title = "Session configuration",
         description = "Session configuration including catalog, database, and Flink configuration properties."
     )
-    @PluginProperty(dynamic = true)
     private Property<SessionConfig> sessionConfig;
 
     @Schema(
         title = "Connection timeout",
         description = "Timeout for connecting to the SQL Gateway in seconds. Defaults to 30."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Integer> connectionTimeout = Property.of(30);
 
@@ -132,7 +130,6 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         title = "Statement timeout",
         description = "Timeout for SQL statement execution in seconds. Defaults to 300."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Integer> statementTimeout = Property.of(300);
 
@@ -142,7 +139,6 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
                       "For streaming jobs, include 'RUNNING' - these sessions will be kept alive. " +
                       "For batch jobs, use ['FINISHED']. Defaults to ['FINISHED', 'RUNNING']."
     )
-    @PluginProperty
     private Property<java.util.List<String>> acceptableStates;
 
     @Override
@@ -156,6 +152,10 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
         // Create or get session
         String sessionHandle = createOrGetSession(runContext, rGatewayUrl);
+
+        // Render sessionName before try block to avoid exception suppression in finally
+        String sessionName = this.sessionName != null ?
+            runContext.render(this.sessionName).as(String.class).orElse(null) : null;
 
         OperationResult result = null;
         boolean keepSessionOpen = false;
@@ -179,8 +179,6 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         } finally {
             // Close session if we created it (no session name means we created a temporary session)
             // BUT keep it open if the operation is still running (streaming jobs)
-            String sessionName = this.sessionName != null ?
-                runContext.render(this.sessionName).as(String.class).orElse(null) : null;
             if (sessionName == null && !keepSessionOpen) {
                 closeSession(runContext, rGatewayUrl, sessionHandle);
             }

@@ -24,9 +24,7 @@ done
 
 if [ $counter -ge $timeout ]; then
     echo "Timeout: Flink cluster failed to start"
-    docker-compose -f docker-compose-ci.yml logs
-    exit 1
-    docker-compose -f docker-compose-ci.yml logs
+    docker compose -f docker-compose-ci.yml logs
     exit 1
 fi
 
@@ -37,4 +35,4 @@ echo "To run tests with Flink integration:"
 echo "  ./gradlew test -Dflink.integration.test=true"
 echo ""
 echo "To stop the environment:"
-echo "  docker-compose -f docker-compose-ci.yml down"
+echo "  docker compose -f docker-compose-ci.yml down"

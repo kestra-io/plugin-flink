@@ -3,7 +3,6 @@ package io.kestra.plugin.flink;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
@@ -89,7 +88,6 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                       "Use ISO-8601 duration format (e.g., 'PT30S' for 30 seconds). " +
                       "Defaults to PT10S."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Duration> interval = Property.of(Duration.parse("PT10S"));
 
@@ -99,7 +97,6 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                       "If false, the task will complete successfully even if the job failed. " +
                       "Defaults to true."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Boolean> failOnError = Property.of(true);
 
@@ -108,7 +105,6 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         description = "List of job states to consider as successful completion. " +
                       "Defaults to ['FINISHED']."
     )
-    @PluginProperty
     private Property<java.util.List<String>> expectedTerminalStates;
 
     @Override
@@ -169,8 +165,13 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
             return Optional.empty();
 
         } catch (Exception e) {
-            logger.error("Failed to check job status for {}: {}", rJobId, e.getMessage());
-            return Optional.empty();
+            logger.error("Failed to check job status for {}", rJobId, e);
+            // For transient errors (IOException, timeouts), continue polling
+            // For permanent errors (404, invalid URL), fail fast
+            if (e instanceof RuntimeException && e.getMessage() != null && e.getMessage().contains("Job not found")) {
+                throw e; // Fail fast on permanent errors
+            }
+            return Optional.empty(); // Retry on transient errors
         }
     }
 
@@ -184,8 +185,9 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     private JobStatus getJobStatus(HttpClient client, String restUrl, String jobId)
             throws Exception {
 
+        String normalizedUrl = restUrl.endsWith("/") ? restUrl.substring(0, restUrl.length() - 1) : restUrl;
         HttpRequest request = HttpRequest.builder()
-            .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
+            .uri(URI.create(normalizedUrl + "/v1/jobs/" + jobId))
             .method("GET")
             .build();
 

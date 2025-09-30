@@ -3,7 +3,6 @@ package io.kestra.plugin.flink;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
@@ -70,16 +69,16 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         title = "Flink REST API URL",
         description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     protected Property<String> restUrl;
 
     @Schema(
         title = "URI of the JAR file to submit",
         description = "The URI pointing to the JAR file containing the Flink job. " +
-                      "Supports file://, s3://, http:// and other schemes."
+                      "Supports file://, kestra://, s3://, http:// and other schemes. " +
+                      "Note: Large JAR files (e.g., fat JARs with many dependencies) are loaded into memory " +
+                      "during upload, which may require sufficient heap space."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> jarUri;
 
@@ -87,7 +86,6 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         title = "Main class to execute",
         description = "The fully qualified name of the main class to execute."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> entryClass;
 
@@ -95,7 +93,6 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         title = "Program arguments",
         description = "Arguments to pass to the main method of the job."
     )
-    @PluginProperty(dynamic = true)
     private Property<List<String>> args;
 
     @Schema(
@@ -103,14 +100,12 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "The parallelism for the job execution. If not specified, " +
                       "the cluster default parallelism will be used."
     )
-    @PluginProperty
     private Property<Integer> parallelism;
 
     @Schema(
         title = "Restore from savepoint",
         description = "Path to a savepoint to restore the job from."
     )
-    @PluginProperty(dynamic = true)
     private Property<String> restoreFromSavepoint;
 
     @Schema(
@@ -118,7 +113,6 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "Allow to skip savepoint state that cannot be restored. " +
                       "Defaults to false."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Boolean> allowNonRestoredState = Property.of(false);
 
@@ -126,7 +120,6 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         title = "Job configuration",
         description = "Additional configuration parameters for the job."
     )
-    @PluginProperty(dynamic = true)
     private Property<Map<String, String>> jobConfig;
 
     @Override
@@ -161,10 +154,11 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
             return URI.create(jarUri);
         }
 
-        // For remote JARs, download to working directory
+        // For remote JARs (including kestra://), download to working directory
         try (InputStream jarStream = runContext.storage().getFile(URI.create(jarUri))) {
             java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("flink-job", ".jar");
             java.nio.file.Files.copy(jarStream, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            tempFile.toFile().deleteOnExit();
             return tempFile.toUri();
         }
     }
@@ -173,7 +167,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         try (HttpClient client = HttpClient.builder()
                 .runContext(runContext)
                 .build()) {
-            java.nio.file.Path jarPath = java.nio.file.Path.of(jarLocation);
+            java.nio.file.Path jarPath = java.nio.file.Paths.get(jarLocation);
             String fileName = jarPath.getFileName().toString();
 
             // Create multipart request body for JAR upload

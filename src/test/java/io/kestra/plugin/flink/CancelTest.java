@@ -8,13 +8,13 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @KestraTest
-class CancelTest {
+class CancelJobTest {
 
     @Test
-    void testCancelTaskCreation() {
-        Cancel cancel = Cancel.builder()
+    void testCancelJobTaskCreation() {
+        CancelJob cancel = CancelJob.builder()
             .id("test-cancel")
-            .type(Cancel.class.getName())
+            .type(CancelJob.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
             .jobId(Property.of("test-job-id"))
             .withSavepoint(Property.of(true))
@@ -31,10 +31,10 @@ class CancelTest {
     }
 
     @Test
-    void testCancelTaskDefaults() {
-        Cancel cancel = Cancel.builder()
+    void testCancelJobTaskDefaults() {
+        CancelJob cancel = CancelJob.builder()
             .id("test-cancel-defaults")
-            .type(Cancel.class.getName())
+            .type(CancelJob.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
             .jobId(Property.of("test-job-id"))
             .build();
@@ -46,10 +46,10 @@ class CancelTest {
     }
 
     @Test
-    void testCancelTaskWithDrain() {
-        Cancel cancel = Cancel.builder()
+    void testCancelJobTaskWithDrain() {
+        CancelJob cancel = CancelJob.builder()
             .id("test-cancel-drain")
-            .type(Cancel.class.getName())
+            .type(CancelJob.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
             .jobId(Property.of("test-job-id"))
             .drainJob(Property.of(true))

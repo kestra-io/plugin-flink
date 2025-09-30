@@ -2,7 +2,6 @@ package io.kestra.plugin.flink;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
@@ -72,7 +71,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         title = "Flink REST API URL",
         description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> restUrl;
 
@@ -80,7 +78,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         title = "Job ID",
         description = "The ID of the Flink job to create a savepoint for"
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     private Property<String> jobId;
 
@@ -89,14 +86,12 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Target directory for the savepoint. If not specified, " +
                       "the cluster's default savepoint directory will be used."
     )
-    @PluginProperty(dynamic = true)
     private Property<String> targetDirectory;
 
     @Schema(
         title = "Cancel job after savepoint",
         description = "Whether to cancel the job after creating the savepoint. Defaults to false."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Boolean> cancelJob = Property.of(false);
 
@@ -104,7 +99,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         title = "Savepoint timeout",
         description = "Maximum time to wait for savepoint creation in seconds. Defaults to 300."
     )
-    @PluginProperty
     @Builder.Default
     private Property<Integer> savepointTimeout = Property.of(300);
 
@@ -113,7 +107,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Format type of the savepoint. Can be 'CANONICAL' or 'NATIVE'. " +
                       "Defaults to 'CANONICAL' for better compatibility."
     )
-    @PluginProperty
     @Builder.Default
     private Property<String> formatType = Property.of("CANONICAL");
 
@@ -121,26 +114,26 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     public TriggerSavepoint.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String renderedRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
-        String renderedJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
+        String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
+        String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean cancel = runContext.render(this.cancelJob).as(Boolean.class).orElse(false);
 
-        logger.info("Triggering savepoint for job: {} (cancel: {})", renderedJobId, cancel);
+        logger.info("Triggering savepoint for job: {} (cancel: {})", rJobId, cancel);
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
             .build();
 
         // Trigger the savepoint
-        String requestId = triggerSavepoint(runContext, client, renderedRestUrl, renderedJobId, cancel);
+        String requestId = triggerSavepoint(runContext, client, rRestUrl, rJobId, cancel);
 
         // Wait for completion
-        String savepointPath = waitForSavepointCompletion(runContext, client, renderedRestUrl, renderedJobId, requestId);
+        String savepointPath = waitForSavepointCompletion(runContext, client, rRestUrl, rJobId, requestId);
 
         logger.info("Savepoint created successfully at: {}", savepointPath);
 
         return Output.builder()
-            .jobId(renderedJobId)
+            .jobId(rJobId)
             .savepointPath(savepointPath)
             .requestId(requestId)
             .build();

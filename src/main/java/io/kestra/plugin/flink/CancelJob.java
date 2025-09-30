@@ -23,6 +23,8 @@ import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -45,7 +47,7 @@ import java.time.Duration;
 
                 tasks:
                   - id: cancel-job
-                    type: io.kestra.plugin.flink.Cancel
+                    type: io.kestra.plugin.flink.CancelJob
                     restUrl: "http://flink-jobmanager:8081"
                     jobId: "{{ inputs.jobId }}"
                     withSavepoint: true
@@ -55,17 +57,22 @@ import java.time.Duration;
         ),
         @Example(
             title = "Force cancel without savepoint",
+            full = true,
             code = """
-                id: force-cancel
-                type: io.kestra.plugin.flink.Cancel
-                restUrl: "http://flink-jobmanager:8081"
-                jobId: "{{ inputs.jobId }}"
-                withSavepoint: false
+                id: force-cancel-job
+                namespace: company.team
+
+                tasks:
+                  - id: force-cancel
+                    type: io.kestra.plugin.flink.CancelJob
+                    restUrl: "http://flink-jobmanager:8081"
+                    jobId: "{{ inputs.jobId }}"
+                    withSavepoint: false
                 """
         )
     }
 )
-public class Cancel extends Task implements RunnableTask<Cancel.Output> {
+public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
 
     private static final ObjectMapper OBJECT_MAPPER = JacksonMapper.ofJson();
 
@@ -112,7 +119,7 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
     private Property<Integer> cancellationTimeout = Property.of(60);
 
     @Override
-    public Cancel.Output run(RunContext runContext) throws Exception {
+    public CancelJob.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
         String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
@@ -161,7 +168,10 @@ public class Cancel extends Task implements RunnableTask<Cancel.Output> {
             throw new IllegalArgumentException("savepointDir is required when withSavepoint is true");
         }
 
-        String payload = "{\"targetDirectory\":\"" + savepointDirectory + "\",\"cancelJob\":false}";
+        Map<String, Object> payloadMap = new HashMap<>();
+        payloadMap.put("targetDirectory", savepointDirectory);
+        payloadMap.put("cancelJob", false);
+        String payload = OBJECT_MAPPER.writeValueAsString(payloadMap);
 
         HttpRequest request = HttpRequest.builder()
             .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints"))

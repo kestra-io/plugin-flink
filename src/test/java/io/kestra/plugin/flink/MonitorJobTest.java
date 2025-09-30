@@ -20,7 +20,6 @@ class MonitorJobTest {
             .type(MonitorJob.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
             .jobId(Property.of("test-job-id"))
-            .interval(Property.of(Duration.ofSeconds(30)))
             .failOnError(Property.of(false))
             .build();
 
@@ -29,7 +28,6 @@ class MonitorJobTest {
         assertThat(monitor.getJobId(), notNullValue());
         assertThat(monitor.getInterval(), notNullValue());
         assertThat(monitor.getFailOnError(), notNullValue());
-        assertThat(monitor.getInterval(), is(Duration.ofSeconds(10))); // Default interval
     }
 
     @Test

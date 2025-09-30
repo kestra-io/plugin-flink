@@ -35,7 +35,6 @@ services:
         taskmanager.numberOfTaskSlots: 2
         parallelism.default: 1
         taskmanager.memory.process.size: 1024m
-        jobmanager.memory.process.size: 1024m
 
 networks:
   default:
