@@ -297,9 +297,8 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         try {
             return new RetryUtils().<OperationResult, Exception>of(
                 Exponential.builder()
-                    .delayFactor(1.0) // Fixed interval
                     .interval(Duration.ofSeconds(intervalSec))
-                    .maxInterval(Duration.ofSeconds(intervalSec))
+                    .maxInterval(Duration.ofMinutes(1))
                     .maxAttempts(maxAttempts)
                     .build()
             ).run(
@@ -382,7 +381,17 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     private String extractSessionHandleFromResponse(String responseBody) {
         try {
-            JsonNode identifier = JSON.readTree(responseBody).path("sessionHandle").path("identifier");
+            JsonNode root = JSON.readTree(responseBody);
+            JsonNode sessionHandle = root.path("sessionHandle");
+
+            // Handle both formats:
+            // 1. Direct string: {"sessionHandle":"uuid"}
+            // 2. Nested object: {"sessionHandle":{"identifier":"uuid"}}
+            if (sessionHandle.isTextual() && !sessionHandle.asText().isEmpty()) {
+                return sessionHandle.asText();
+            }
+
+            JsonNode identifier = sessionHandle.path("identifier");
             if (identifier.isTextual() && !identifier.asText().isEmpty()) {
                 return identifier.asText();
             }
@@ -394,7 +403,17 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     private String extractOperationHandleFromResponse(String responseBody) {
         try {
-            JsonNode identifier = JSON.readTree(responseBody).path("operationHandle").path("identifier");
+            JsonNode root = JSON.readTree(responseBody);
+            JsonNode operationHandle = root.path("operationHandle");
+
+            // Handle both formats:
+            // 1. Direct string: {"operationHandle":"uuid"}
+            // 2. Nested object: {"operationHandle":{"identifier":"uuid"}}
+            if (operationHandle.isTextual() && !operationHandle.asText().isEmpty()) {
+                return operationHandle.asText();
+            }
+
+            JsonNode identifier = operationHandle.path("identifier");
             if (identifier.isTextual() && !identifier.asText().isEmpty()) {
                 return identifier.asText();
             }

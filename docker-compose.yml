@@ -1,6 +1,5 @@
-version: "3.8"
-
 services:
+  # Kestra server with Flink plugin
   app:
     build:
       context: .
@@ -10,3 +9,63 @@ services:
       - "8080:8080"
     volumes:
       - ./build/libs/:/app/plugins/
+    depends_on:
+      - flink-jobmanager
+      - flink-sql-gateway
+    networks:
+      - flink-network
+
+  # Flink JobManager
+  flink-jobmanager:
+    image: flink:1.18
+    hostname: flink-jobmanager
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+    networks:
+      - flink-network
+
+  # Flink TaskManager
+  flink-taskmanager:
+    image: flink:1.18
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+    networks:
+      - flink-network
+
+  # Flink SQL Gateway
+  flink-sql-gateway:
+    image: flink:1.18
+    hostname: flink-sql-gateway
+    ports:
+      - "8083:8083"
+    command: bin/sql-gateway.sh start-foreground
+    depends_on:
+      - flink-jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
+        rest.port: 8081
+        sql-gateway.endpoint.rest.address: 0.0.0.0
+        sql-gateway.endpoint.rest.port: 8083
+    networks:
+      - flink-network
+
+networks:
+  flink-network:
+    driver: bridge
