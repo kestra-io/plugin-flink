@@ -26,12 +26,18 @@ class SubmitTest {
     private RunContextFactory runContextFactory;
 
     @Test
+    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskCreation() throws Exception {
+        String jarUri = System.getProperty("flink.integration.jarUri");
+        Assumptions.assumeTrue(jarUri != null && !jarUri.isBlank(), "Provide -Dflink.integration.jarUri with a valid Flink job JAR");
+        Path jarPath = Path.of(URI.create(jarUri));
+        Assumptions.assumeTrue(Files.exists(jarPath), () -> "JAR not found at " + jarUri);
+
         Submit submit = Submit.builder()
             .id("test-submit")
             .type(Submit.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of("file:///path/to/job.jar"))
+            .jarUri(Property.of(jarUri))
             .entryClass(Property.of("com.example.Main"))
             .args(Property.of(Arrays.asList("--input", "test")))
             .parallelism(Property.of(4))
@@ -48,9 +54,14 @@ class SubmitTest {
         Integer rParallelism = runContext.render(submit.getParallelism()).as(Integer.class).orElseThrow();
 
         assertThat(rUrl, is("http://localhost:8081"));
-        assertThat(rJarUri, is("file:///path/to/job.jar"));
+        assertThat(rJarUri, startsWith("file://"));
         assertThat(rEntryClass, is("com.example.Main"));
         assertThat(rParallelism, is(4));
+
+        // Actually run the task
+        Submit.Output output = submit.run(runContext);
+        assertThat(output.getJobId(), notNullValue());
+        assertThat(output.getJarId(), notNullValue());
     }
 
     @Test
@@ -80,14 +91,23 @@ class SubmitTest {
     }
 
     @Test
+    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskWithSavepoint() throws Exception {
+        String jarUri = System.getProperty("flink.integration.jarUri");
+        Assumptions.assumeTrue(jarUri != null && !jarUri.isBlank(), "Provide -Dflink.integration.jarUri with a valid Flink job JAR");
+        Path jarPath = Path.of(URI.create(jarUri));
+        Assumptions.assumeTrue(Files.exists(jarPath), () -> "JAR not found at " + jarUri);
+
+        String savepointPath = System.getProperty("flink.integration.savepointPath");
+        Assumptions.assumeTrue(savepointPath != null && !savepointPath.isBlank(), "Provide -Dflink.integration.savepointPath");
+
         Submit submit = Submit.builder()
             .id("test-submit-savepoint")
             .type(Submit.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of("file:///path/to/job.jar"))
+            .jarUri(Property.of(jarUri))
             .entryClass(Property.of("com.example.Main"))
-            .restoreFromSavepoint(Property.of("s3://savepoints/latest"))
+            .restoreFromSavepoint(Property.of(savepointPath))
             .allowNonRestoredState(Property.of(true))
             .build();
 
@@ -101,14 +121,25 @@ class SubmitTest {
         Boolean rAllowNonRestored = runContext.render(submit.getAllowNonRestoredState()).as(Boolean.class).orElseThrow();
 
         assertThat(rUrl, is("http://localhost:8081"));
-        assertThat(rJarUri, is("file:///path/to/job.jar"));
+        assertThat(rJarUri, startsWith("file://"));
         assertThat(rEntryClass, is("com.example.Main"));
-        assertThat(rSavepoint, is("s3://savepoints/latest"));
+        assertThat(rSavepoint, is(savepointPath));
         assertThat(rAllowNonRestored, is(true));
+
+        // Actually run the task
+        Submit.Output output = submit.run(runContext);
+        assertThat(output.getJobId(), notNullValue());
+        assertThat(output.getJarId(), notNullValue());
     }
 
     @Test
+    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskWithJobConfig() throws Exception {
+        String jarUri = System.getProperty("flink.integration.jarUri");
+        Assumptions.assumeTrue(jarUri != null && !jarUri.isBlank(), "Provide -Dflink.integration.jarUri with a valid Flink job JAR");
+        Path jarPath = Path.of(URI.create(jarUri));
+        Assumptions.assumeTrue(Files.exists(jarPath), () -> "JAR not found at " + jarUri);
+
         Map<String, String> config = new HashMap<>();
         config.put("execution.checkpointing.interval", "30s");
         config.put("state.backend", "rocksdb");
@@ -117,7 +148,7 @@ class SubmitTest {
             .id("test-submit-config")
             .type(Submit.class.getName())
             .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of("file:///path/to/job.jar"))
+            .jarUri(Property.of(jarUri))
             .entryClass(Property.of("com.example.Main"))
             .jobConfig(Property.of(config))
             .build();
@@ -131,5 +162,10 @@ class SubmitTest {
         assertThat(rConfig, notNullValue());
         assertThat(rConfig.get("execution.checkpointing.interval"), is("30s"));
         assertThat(rConfig.get("state.backend"), is("rocksdb"));
+
+        // Actually run the task
+        Submit.Output output = submit.run(runContext);
+        assertThat(output.getJobId(), notNullValue());
+        assertThat(output.getJarId(), notNullValue());
     }
 }
