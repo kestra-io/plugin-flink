@@ -1,0 +1,41 @@
+services:
+  jobmanager:
+    image: flink:1.20.1-scala_2.12-java17
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+        jobmanager.execution.failover-strategy: region
+        taskmanager.memory.process.size: 1024m
+        jobmanager.memory.process.size: 1024m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  taskmanager:
+    image: flink:1.20.1-scala_2.12-java17
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+    command: taskmanager
+    scale: 1
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.rpc.port: 6122
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+        taskmanager.memory.process.size: 1024m
+
+networks:
+  default:
+    name: flink-test-network
