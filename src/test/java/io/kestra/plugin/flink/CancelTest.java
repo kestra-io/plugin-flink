@@ -8,7 +8,6 @@ import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.util.HashMap;
 
@@ -21,7 +20,6 @@ class CancelJobTest {
     private RunContextFactory runContextFactory;
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testCancelJobTaskCreation() throws Exception {
         // First, we need a job ID - assume it's provided as a system property
         String jobId = System.getProperty("flink.integration.jobId");
@@ -52,7 +50,6 @@ class CancelJobTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testCancelJobTaskDefaults() throws Exception {
         String jobId = System.getProperty("flink.integration.jobId");
         Assumptions.assumeTrue(jobId != null && !jobId.isBlank(), "Provide -Dflink.integration.jobId with a running job ID");
@@ -77,7 +74,6 @@ class CancelJobTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testCancelJobTaskWithDrain() throws Exception {
         String jobId = System.getProperty("flink.integration.jobId");
         Assumptions.assumeTrue(jobId != null && !jobId.isBlank(), "Provide -Dflink.integration.jobId with a running job ID");

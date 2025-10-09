@@ -8,7 +8,6 @@ import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.net.URI;
 import java.nio.file.Files;
@@ -26,7 +25,6 @@ class SubmitTest {
     private RunContextFactory runContextFactory;
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskCreation() throws Exception {
         String jarUri = System.getProperty("flink.integration.jarUri");
         Assumptions.assumeTrue(jarUri != null && !jarUri.isBlank(), "Provide -Dflink.integration.jarUri with a valid Flink job JAR");
@@ -65,7 +63,6 @@ class SubmitTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskExecution() throws Exception {
         // This test requires a running Flink cluster
         String jarUri = System.getProperty("flink.integration.jarUri");
@@ -91,7 +88,6 @@ class SubmitTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskWithSavepoint() throws Exception {
         String jarUri = System.getProperty("flink.integration.jarUri");
         Assumptions.assumeTrue(jarUri != null && !jarUri.isBlank(), "Provide -Dflink.integration.jarUri with a valid Flink job JAR");
@@ -133,7 +129,6 @@ class SubmitTest {
     }
 
     @Test
-    @EnabledIfSystemProperty(named = "flink.integration.test", matches = "true")
     void testSubmitTaskWithJobConfig() throws Exception {
         String jarUri = System.getProperty("flink.integration.jarUri");
         Assumptions.assumeTrue(jarUri != null && !jarUri.isBlank(), "Provide -Dflink.integration.jarUri with a valid Flink job JAR");
