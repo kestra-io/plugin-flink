@@ -99,7 +99,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
 
     @Schema(
         title = "Savepoint directory",
-        description = "Target directory for the savepoint. Required if withSavepoint is true."
+        description = "Target directory for the savepoint. Required if `withSavepoint` is true."
     )
     private Property<String> savepointDir;
 
