@@ -1,0 +1,8 @@
+group: io.kestra.plugin.flink
+name: "flink"
+title: "Apache Flink"
+description: "This sub-group of plugins contains tasks for orchestrating Apache Flink jobs, including job submission, monitoring, and savepoint management."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
