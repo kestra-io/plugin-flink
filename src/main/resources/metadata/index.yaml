@@ -1,8 +1,8 @@
 group: io.kestra.plugin.flink
 name: "flink"
 title: "Apache Flink"
-description: "This sub-group of plugins contains tasks for orchestrating Apache Flink jobs, including job submission, monitoring, and savepoint management."
-body: ""
+description: "Tasks that submit, monitor, cancel, and trigger savepoints for Apache Flink jobs over the REST API."
+body: "Provide the Flink JobManager REST `restUrl` plus job details such as `jarUri`, `entryClass`, args, parallelism, and optional savepoint paths to upload and run jobs, monitor status, cancel executions, or trigger savepoints directly from Kestra."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
