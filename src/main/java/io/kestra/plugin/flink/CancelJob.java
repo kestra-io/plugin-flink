@@ -234,7 +234,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec));
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
-        new RetryUtils().<Boolean, Exception>of(
+        RetryUtils.<Boolean, Exception>of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
                 .interval(Duration.ofSeconds(intervalSec))
@@ -293,7 +293,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         int timeoutSeconds = 300; // 5 minutes for savepoint
         int maxAttempts = timeoutSeconds / 5; // Check every 5 seconds
 
-        return new RetryUtils().<String, Exception>of(
+        return RetryUtils.<String, Exception>of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
                 .interval(Duration.ofSeconds(5))

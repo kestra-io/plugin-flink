@@ -185,7 +185,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
-        return new RetryUtils().<String, Exception>of(
+        return RetryUtils.<String, Exception>of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
                 .interval(Duration.ofSeconds(intervalSec))

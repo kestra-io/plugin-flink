@@ -295,7 +295,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeout);
 
         try {
-            return new RetryUtils().<OperationResult, Exception>of(
+            return RetryUtils.<OperationResult, Exception>of(
                 Exponential.builder()
                     .interval(Duration.ofSeconds(intervalSec))
                     .maxInterval(Duration.ofMinutes(1))
