@@ -34,9 +34,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Submit a Flink job using a JAR file.",
-    description = "This task submits a job to Apache Flink using a JAR file. " +
-                  "It supports job configuration, parallelism settings, and savepoint restoration."
+    title = "Submit Flink job from JAR over REST",
+    description = "Uploads a JAR to the Flink REST API then runs its entry class. Supports program arguments, explicit parallelism, and savepoint restore. Large JAR uploads are buffered in memory."
 )
 @Plugin(
     examples = {
@@ -67,58 +66,53 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
     @Schema(
         title = "Flink REST API URL",
-        description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
+        description = "Base URL of the Flink cluster REST API (e.g., http://flink-jobmanager:8081)."
     )
     @NotNull
     protected Property<String> restUrl;
 
     @Schema(
-        title = "URI of the JAR file to submit",
-        description = "The URI pointing to the JAR file containing the Flink job. " +
-                      "Supports file://, kestra://, s3://, http:// and other schemes. " +
-                      "Note: Large JAR files (e.g., fat JARs with many dependencies) are loaded into memory " +
-                      "during upload, which may require sufficient heap space."
+        title = "JAR URI",
+        description = "URI of the job JAR to upload. Supports file://, kestra://, s3://, http:// and other schemes. Large artifacts are read fully into memory during upload."
     )
     @NotNull
     private Property<String> jarUri;
 
     @Schema(
         title = "Main class to execute",
-        description = "The fully qualified name of the main class to execute."
+        description = "Fully qualified entry class inside the JAR."
     )
     @NotNull
     private Property<String> entryClass;
 
     @Schema(
         title = "Program arguments",
-        description = "Arguments to pass to the main method of the job."
+        description = "Arguments passed to the main method; rendered then space-joined."
     )
     private Property<List<String>> args;
 
     @Schema(
         title = "Job parallelism",
-        description = "The parallelism for the job execution. If not specified, " +
-                      "the cluster default parallelism will be used."
+        description = "Parallelism to use for this job; defaults to the Flink cluster setting when absent."
     )
     private Property<Integer> parallelism;
 
     @Schema(
         title = "Restore from savepoint",
-        description = "Path to a savepoint to restore the job from."
+        description = "Path to a savepoint used to start the job statefully."
     )
     private Property<String> restoreFromSavepoint;
 
     @Schema(
         title = "Allow non-restored state",
-        description = "Allow to skip savepoint state that cannot be restored. " +
-                      "Defaults to false."
+        description = "Skip savepoint state that cannot be restored; defaults to false and used only when restoreFromSavepoint is set."
     )
     @Builder.Default
     private Property<Boolean> allowNonRestoredState = Property.of(false);
 
     @Schema(
         title = "Job configuration",
-        description = "Additional configuration parameters for the job."
+        description = "Additional Flink configuration key/values merged into the run request."
     )
     private Property<Map<String, String>> jobConfig;
 
@@ -297,14 +291,14 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The Flink job ID",
-            description = "The unique identifier assigned to the submitted job"
+            title = "Flink job ID",
+            description = "Identifier returned by Flink for the submitted job."
         )
         private final String jobId;
 
         @Schema(
-            title = "The JAR ID on the Flink cluster",
-            description = "The identifier of the uploaded JAR on the Flink cluster"
+            title = "Uploaded JAR ID",
+            description = "Identifier of the uploaded JAR on the Flink cluster."
         )
         private final String jarId;
     }

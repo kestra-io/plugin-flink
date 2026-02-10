@@ -30,9 +30,8 @@ import java.time.Duration;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a savepoint for a running Flink job.",
-    description = "This task triggers a savepoint for a running Flink job without canceling it. " +
-                  "Savepoints are used to capture the state of a job for backup or migration purposes."
+    title = "Create a savepoint for a running Flink job",
+    description = "Requests a savepoint via the Flink REST API and waits for completion. Supports optional target directory, format type, and post-savepoint cancellation."
 )
 @Plugin(
     examples = {
@@ -69,43 +68,41 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
 
     @Schema(
         title = "Flink REST API URL",
-        description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
+        description = "Base URL of the Flink REST API (e.g., http://flink-jobmanager:8081)."
     )
     @NotNull
     private Property<String> restUrl;
 
     @Schema(
         title = "Job ID",
-        description = "The ID of the Flink job to create a savepoint for"
+        description = "ID of the Flink job to snapshot."
     )
     @NotNull
     private Property<String> jobId;
 
     @Schema(
         title = "Target directory",
-        description = "Target directory for the savepoint. If not specified, " +
-                      "the cluster's default savepoint directory will be used."
+        description = "Target directory for the savepoint; falls back to the cluster default when omitted."
     )
     private Property<String> targetDirectory;
 
     @Schema(
         title = "Cancel job after savepoint",
-        description = "Whether to cancel the job after creating the savepoint. Defaults to false."
+        description = "Cancel the job after the savepoint completes; defaults to false."
     )
     @Builder.Default
     private Property<Boolean> cancelJob = Property.of(false);
 
     @Schema(
         title = "Savepoint timeout",
-        description = "Maximum time to wait for savepoint creation in seconds. Defaults to 300."
+        description = "Maximum wait time for savepoint completion in seconds; defaults to 300."
     )
     @Builder.Default
     private Property<Integer> savepointTimeout = Property.of(300);
 
     @Schema(
         title = "Format type",
-        description = "Format type of the savepoint. Can be 'CANONICAL' or 'NATIVE'. " +
-                      "Defaults to 'CANONICAL' for better compatibility."
+        description = "Savepoint format type: CANONICAL or NATIVE. Defaults to CANONICAL for broader compatibility."
     )
     @Builder.Default
     private Property<String> formatType = Property.of("CANONICAL");
@@ -306,20 +303,20 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The job ID",
-            description = "The ID of the Flink job for which the savepoint was created"
+            title = "Job ID",
+            description = "ID of the Flink job for which the savepoint was created."
         )
         private final String jobId;
 
         @Schema(
             title = "Savepoint path",
-            description = "Path to the created savepoint"
+            description = "Path returned by Flink for the created savepoint."
         )
         private final String savepointPath;
 
         @Schema(
             title = "Request ID",
-            description = "The savepoint request ID"
+            description = "Savepoint request ID used for status polling."
         )
         private final String requestId;
     }

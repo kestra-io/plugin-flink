@@ -33,9 +33,8 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Submit a SQL statement to Flink SQL Gateway.",
-    description = "This task submits a SQL statement to Apache Flink via the SQL Gateway. " +
-                  "No JAR file is required as the SQL is executed directly by Flink."
+    title = "Execute SQL via Flink SQL Gateway",
+    description = "Runs a SQL statement through the Flink SQL Gateway without uploading a JAR. Respects session settings and waits until the operation reaches a terminal state."
 )
 @Plugin(
     examples = {
@@ -95,49 +94,47 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     @Schema(
         title = "SQL Gateway URL",
-        description = "The base URL of the Flink SQL Gateway, e.g., 'http://flink-sql-gateway:8083'"
+        description = "Base URL of the Flink SQL Gateway (e.g., http://flink-sql-gateway:8083)."
     )
     @NotNull
     private Property<String> gatewayUrl;
 
     @Schema(
         title = "SQL statement",
-        description = "The SQL statement to execute. Supports both DDL and DML statements."
+        description = "SQL statement to execute; supports DDL and DML."
     )
     @NotNull
     private Property<String> statement;
 
     @Schema(
         title = "Session name",
-        description = "Optional session name. If not provided, a random session will be created."
+        description = "Optional session name; a temporary session is created when omitted."
     )
     private Property<String> sessionName;
 
     @Schema(
         title = "Session configuration",
-        description = "Session configuration including catalog, database, and Flink configuration properties."
+        description = "Session options such as catalog, database, and configuration properties applied before execution."
     )
     private Property<SessionConfig> sessionConfig;
 
     @Schema(
         title = "Connection timeout",
-        description = "Timeout for connecting to the SQL Gateway in seconds. Defaults to 30."
+        description = "Connection timeout in seconds; defaults to 30."
     )
     @Builder.Default
     private Property<Integer> connectionTimeout = Property.of(30);
 
     @Schema(
         title = "Statement timeout",
-        description = "Timeout for SQL statement execution in seconds. Defaults to 300."
+        description = "Execution timeout in seconds for the SQL statement; defaults to 300."
     )
     @Builder.Default
     private Property<Integer> statementTimeout = Property.of(300);
 
     @Schema(
         title = "Acceptable terminal states",
-        description = "List of operation states to consider as successful completion. " +
-                      "For streaming jobs, include 'RUNNING' - these sessions will be kept alive. " +
-                      "For batch jobs, use ['FINISHED']. Defaults to ['FINISHED', 'RUNNING']."
+        description = "Operation states treated as success. For streaming include RUNNING to keep the session open. Defaults to ['FINISHED', 'RUNNING']."
     )
     private Property<java.util.List<String>> acceptableStates;
 
@@ -497,26 +494,26 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The operation handle",
-            description = "The unique identifier for the executed SQL operation"
+            title = "Operation handle",
+            description = "Unique identifier for the executed SQL operation."
         )
         private final String operationHandle;
 
         @Schema(
-            title = "The session handle",
-            description = "The unique identifier for the SQL Gateway session"
+            title = "Session handle",
+            description = "Identifier for the SQL Gateway session used."
         )
         private final String sessionHandle;
 
         @Schema(
             title = "Result count",
-            description = "Number of rows affected or returned by the operation"
+            description = "Number of rows affected or returned; -1 when the gateway does not provide it."
         )
         private final Integer resultCount;
 
         @Schema(
             title = "Operation status",
-            description = "Final status of the operation"
+            description = "Final status reported by the SQL Gateway."
         )
         private final String status;
     }
