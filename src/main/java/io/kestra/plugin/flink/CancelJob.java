@@ -32,9 +32,8 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Cancel a running Flink job.",
-    description = "This task cancels a running Flink job. Optionally, it can trigger a savepoint " +
-                  "before cancellation to preserve the job state."
+    title = "Cancel a running Flink job",
+    description = "Stops a Flink job via the REST API, optionally creating a savepoint first. Supports draining streaming jobs and waits until the cancellation completes or times out."
 )
 @Plugin(
     examples = {
@@ -78,42 +77,41 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
 
     @Schema(
         title = "Flink REST API URL",
-        description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
+        description = "Base URL of the Flink REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
     private Property<String> restUrl;
 
     @Schema(
         title = "Job ID",
-        description = "The ID of the Flink job to cancel"
+        description = "ID of the Flink job to cancel."
     )
     @NotNull
     private Property<String> jobId;
 
     @Schema(
         title = "Create savepoint before cancellation",
-        description = "Whether to trigger a savepoint before canceling the job. Defaults to false."
+        description = "Trigger a savepoint before cancelling the job; defaults to false."
     )
     @Builder.Default
     private Property<Boolean> withSavepoint = Property.of(false);
 
     @Schema(
         title = "Savepoint directory",
-        description = "Target directory for the savepoint. Required if `withSavepoint` is true."
+        description = "Target directory for the savepoint; required when withSavepoint is true."
     )
     private Property<String> savepointDir;
 
     @Schema(
         title = "Drain job",
-        description = "Whether to drain the job (process all remaining input) before cancellation. " +
-                      "Only applicable for streaming jobs. Defaults to false."
+        description = "Drain streaming input before stopping. Applicable to streaming jobs only; defaults to false."
     )
     @Builder.Default
     private Property<Boolean> drainJob = Property.of(false);
 
     @Schema(
         title = "Cancellation timeout",
-        description = "Maximum time to wait for cancellation to complete in seconds. Defaults to 60."
+        description = "Maximum time to wait for cancellation completion in seconds; defaults to 60."
     )
     @Builder.Default
     private Property<Integer> cancellationTimeout = Property.of(60);
@@ -404,20 +402,20 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The cancelled job ID",
-            description = "The ID of the Flink job that was cancelled"
+            title = "Cancelled job ID",
+            description = "ID of the Flink job that was cancelled."
         )
         private final String jobId;
 
         @Schema(
             title = "Savepoint path",
-            description = "Path to the savepoint created before cancellation (if withSavepoint was true)"
+            description = "Path to the savepoint created before cancellation when requested."
         )
         private final String savepointPath;
 
         @Schema(
             title = "Cancellation result",
-            description = "Result message from the cancellation operation"
+            description = "Result message returned by Flink for the cancellation request."
         )
         private final String cancellationResult;
 
