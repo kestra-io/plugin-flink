@@ -69,7 +69,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     @Schema(
         title = "Flink REST API URL",
-        description = "Base URL of the Flink REST API (e.g., http://flink-jobmanager:8081)."
+        description = "Base URL of the Flink REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
     private Property<String> restUrl;

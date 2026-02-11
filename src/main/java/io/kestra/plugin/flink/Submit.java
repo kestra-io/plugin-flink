@@ -66,7 +66,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
     @Schema(
         title = "Flink REST API URL",
-        description = "Base URL of the Flink cluster REST API (e.g., http://flink-jobmanager:8081)."
+        description = "Base URL of the Flink cluster REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
     protected Property<String> restUrl;

@@ -94,7 +94,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     @Schema(
         title = "SQL Gateway URL",
-        description = "Base URL of the Flink SQL Gateway (e.g., http://flink-sql-gateway:8083)."
+        description = "Base URL of the Flink SQL Gateway (e.g., `http://flink-sql-gateway:8083`)."
     )
     @NotNull
     private Property<String> gatewayUrl;
