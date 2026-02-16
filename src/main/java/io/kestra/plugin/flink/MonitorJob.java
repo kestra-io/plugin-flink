@@ -34,9 +34,8 @@ import java.util.regex.Pattern;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Monitor a Flink job and trigger flow execution on state changes.",
-    description = "This trigger continuously monitors a Flink job and triggers flow execution " +
-                  "when the job reaches specified terminal states or encounters failures."
+    title = "Trigger on Flink job state",
+    description = "Polls a Flink job over REST and triggers a flow when it reaches a terminal state. Uses a 10s polling default and can fail the flow on FAILED states."
 )
 @Plugin(
     examples = {
@@ -70,40 +69,35 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     @Schema(
         title = "Flink REST API URL",
-        description = "The base URL of the Flink cluster's REST API, e.g., 'http://flink-jobmanager:8081'"
+        description = "Base URL of the Flink REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
     private Property<String> restUrl;
 
     @Schema(
         title = "Job ID",
-        description = "The ID of the Flink job to monitor"
+        description = "ID of the Flink job to monitor."
     )
     @NotNull
     private Property<String> jobId;
 
     @Schema(
         title = "Polling interval",
-        description = "Interval between job status checks. " +
-                      "Use ISO-8601 duration format (e.g., 'PT30S' for 30 seconds). " +
-                      "Defaults to PT10S."
+        description = "Interval between job status checks (ISO-8601 duration, e.g., PT30S). Defaults to PT10S."
     )
     @Builder.Default
     private Property<Duration> interval = Property.of(Duration.parse("PT10S"));
 
     @Schema(
         title = "Fail on error",
-        description = "Whether to fail the task if the job reaches FAILED state. " +
-                      "If false, the task will complete successfully even if the job failed. " +
-                      "Defaults to true."
+        description = "Fail the trigger when the job reaches FAILED. If false, trigger still fires with success=false; defaults to true."
     )
     @Builder.Default
     private Property<Boolean> failOnError = Property.of(true);
 
     @Schema(
         title = "Expected terminal states",
-        description = "List of job states to consider as successful completion. " +
-                      "Defaults to ['FINISHED']."
+        description = "Job states treated as success. Defaults to ['FINISHED']."
     )
     private Property<java.util.List<String>> expectedTerminalStates;
 
