@@ -27,6 +27,9 @@ import io.kestra.core.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
 
+import io.kestra.core.models.enums.MonacoLanguages;
+import io.kestra.core.models.annotations.PluginProperty;
+
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
@@ -104,6 +107,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         description = "SQL statement to execute; supports DDL and DML."
     )
     @NotNull
+    @PluginProperty(language = MonacoLanguages.SQL)
     private Property<String> statement;
 
     @Schema(
