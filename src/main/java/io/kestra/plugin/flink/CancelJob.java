@@ -94,7 +94,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "Trigger a savepoint before cancelling the job; defaults to false."
     )
     @Builder.Default
-    private Property<Boolean> withSavepoint = Property.of(false);
+    private Property<Boolean> withSavepoint = Property.ofValue(false);
 
     @Schema(
         title = "Savepoint directory",
@@ -107,14 +107,14 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "Drain streaming input before stopping. Applicable to streaming jobs only; defaults to false."
     )
     @Builder.Default
-    private Property<Boolean> drainJob = Property.of(false);
+    private Property<Boolean> drainJob = Property.ofValue(false);
 
     @Schema(
         title = "Cancellation timeout",
         description = "Maximum time to wait for cancellation completion in seconds; defaults to 60."
     )
     @Builder.Default
-    private Property<Integer> cancellationTimeout = Property.of(60);
+    private Property<Integer> cancellationTimeout = Property.ofValue(60);
 
     @Override
     public CancelJob.Output run(RunContext runContext) throws Exception {
