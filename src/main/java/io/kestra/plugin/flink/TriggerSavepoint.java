@@ -91,21 +91,21 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Cancel the job after the savepoint completes; defaults to false."
     )
     @Builder.Default
-    private Property<Boolean> cancelJob = Property.of(false);
+    private Property<Boolean> cancelJob = Property.ofValue(false);
 
     @Schema(
         title = "Savepoint timeout",
         description = "Maximum wait time for savepoint completion in seconds; defaults to 300."
     )
     @Builder.Default
-    private Property<Integer> savepointTimeout = Property.of(300);
+    private Property<Integer> savepointTimeout = Property.ofValue(300);
 
     @Schema(
         title = "Format type",
         description = "Savepoint format type: CANONICAL or NATIVE. Defaults to CANONICAL for broader compatibility."
     )
     @Builder.Default
-    private Property<String> formatType = Property.of("CANONICAL");
+    private Property<String> formatType = Property.ofValue("CANONICAL");
 
     @Override
     public TriggerSavepoint.Output run(RunContext runContext) throws Exception {

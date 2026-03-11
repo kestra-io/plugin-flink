@@ -28,21 +28,21 @@ class CancelJobTest {
         CancelJob cancel = CancelJob.builder()
             .id("test-cancel")
             .type(CancelJob.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jobId(Property.of(jobId))
-            .withSavepoint(Property.of(true))
-            .savepointDir(Property.of("/tmp/flink-savepoints"))
-            .drainJob(Property.of(false))
-            .cancellationTimeout(Property.of(120))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue(jobId))
+            .withSavepoint(Property.ofValue(true))
+            .savepointDir(Property.ofValue("/tmp/flink-savepoints"))
+            .drainJob(Property.ofValue(false))
+            .cancellationTimeout(Property.ofValue(120))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, cancel, new HashMap<>());
 
         assertThat(cancel.getId(), is("test-cancel"));
-        assertThat(cancel.getWithSavepoint(), is(Property.of(true)));
-        assertThat(cancel.getSavepointDir(), is(Property.of("/tmp/flink-savepoints")));
-        assertThat(cancel.getDrainJob(), is(Property.of(false)));
-        assertThat(cancel.getCancellationTimeout(), is(Property.of(120)));
+        assertThat(cancel.getWithSavepoint(), is(Property.ofValue(true)));
+        assertThat(cancel.getSavepointDir(), is(Property.ofValue("/tmp/flink-savepoints")));
+        assertThat(cancel.getDrainJob(), is(Property.ofValue(false)));
+        assertThat(cancel.getCancellationTimeout(), is(Property.ofValue(120)));
 
         // Actually run the task
         CancelJob.Output output = cancel.run(runContext);
@@ -57,16 +57,16 @@ class CancelJobTest {
         CancelJob cancel = CancelJob.builder()
             .id("test-cancel-defaults")
             .type(CancelJob.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jobId(Property.of(jobId))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue(jobId))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, cancel, new HashMap<>());
 
         // Test that defaults are set
-        assertThat(cancel.getWithSavepoint(), is(Property.of(false)));
-        assertThat(cancel.getDrainJob(), is(Property.of(false)));
-        assertThat(cancel.getCancellationTimeout(), is(Property.of(60)));
+        assertThat(cancel.getWithSavepoint(), is(Property.ofValue(false)));
+        assertThat(cancel.getDrainJob(), is(Property.ofValue(false)));
+        assertThat(cancel.getCancellationTimeout(), is(Property.ofValue(60)));
 
         // Actually run the task
         CancelJob.Output output = cancel.run(runContext);
@@ -81,17 +81,17 @@ class CancelJobTest {
         CancelJob cancel = CancelJob.builder()
             .id("test-cancel-drain")
             .type(CancelJob.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jobId(Property.of(jobId))
-            .drainJob(Property.of(true))
-            .withSavepoint(Property.of(false))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue(jobId))
+            .drainJob(Property.ofValue(true))
+            .withSavepoint(Property.ofValue(false))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, cancel, new HashMap<>());
 
         assertThat(cancel.getId(), is("test-cancel-drain"));
-        assertThat(cancel.getDrainJob(), is(Property.of(true)));
-        assertThat(cancel.getWithSavepoint(), is(Property.of(false)));
+        assertThat(cancel.getDrainJob(), is(Property.ofValue(true)));
+        assertThat(cancel.getWithSavepoint(), is(Property.ofValue(false)));
 
         // Actually run the task
         CancelJob.Output output = cancel.run(runContext);
