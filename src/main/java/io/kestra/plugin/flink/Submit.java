@@ -108,7 +108,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "Skip savepoint state that cannot be restored; defaults to false and used only when restoreFromSavepoint is set."
     )
     @Builder.Default
-    private Property<Boolean> allowNonRestoredState = Property.of(false);
+    private Property<Boolean> allowNonRestoredState = Property.ofValue(false);
 
     @Schema(
         title = "Job configuration",

@@ -34,11 +34,11 @@ class SubmitTest {
         Submit submit = Submit.builder()
             .id("test-submit")
             .type(Submit.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of(jarUri))
-            .entryClass(Property.of("com.example.Main"))
-            .args(Property.of(Arrays.asList("--input", "test")))
-            .parallelism(Property.of(4))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jarUri(Property.ofValue(jarUri))
+            .entryClass(Property.ofValue("com.example.Main"))
+            .args(Property.ofValue(Arrays.asList("--input", "test")))
+            .parallelism(Property.ofValue(4))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
@@ -73,11 +73,11 @@ class SubmitTest {
         Submit submit = Submit.builder()
             .id("test-submit")
             .type(Submit.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of(jarUri))
-            .entryClass(Property.of("com.example.TestJob"))
-            .args(Property.of(Arrays.asList("--test-mode")))
-            .parallelism(Property.of(1))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jarUri(Property.ofValue(jarUri))
+            .entryClass(Property.ofValue("com.example.TestJob"))
+            .args(Property.ofValue(Arrays.asList("--test-mode")))
+            .parallelism(Property.ofValue(1))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
@@ -100,11 +100,11 @@ class SubmitTest {
         Submit submit = Submit.builder()
             .id("test-submit-savepoint")
             .type(Submit.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of(jarUri))
-            .entryClass(Property.of("com.example.Main"))
-            .restoreFromSavepoint(Property.of(savepointPath))
-            .allowNonRestoredState(Property.of(true))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jarUri(Property.ofValue(jarUri))
+            .entryClass(Property.ofValue("com.example.Main"))
+            .restoreFromSavepoint(Property.ofValue(savepointPath))
+            .allowNonRestoredState(Property.ofValue(true))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());
@@ -142,10 +142,10 @@ class SubmitTest {
         Submit submit = Submit.builder()
             .id("test-submit-config")
             .type(Submit.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jarUri(Property.of(jarUri))
-            .entryClass(Property.of("com.example.Main"))
-            .jobConfig(Property.of(config))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jarUri(Property.ofValue(jarUri))
+            .entryClass(Property.ofValue("com.example.Main"))
+            .jobConfig(Property.ofValue(config))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, submit, new HashMap<>());

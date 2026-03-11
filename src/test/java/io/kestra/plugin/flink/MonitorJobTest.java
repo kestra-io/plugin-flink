@@ -18,9 +18,9 @@ class MonitorJobTest {
         MonitorJob monitor = MonitorJob.builder()
             .id("test-monitor")
             .type(MonitorJob.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jobId(Property.of("test-job-id"))
-            .failOnError(Property.of(false))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue("test-job-id"))
+            .failOnError(Property.ofValue(false))
             .build();
 
         assertThat(monitor.getId(), is("test-monitor"));
@@ -35,9 +35,9 @@ class MonitorJobTest {
         MonitorJob monitor = MonitorJob.builder()
             .id("test-monitor-states")
             .type(MonitorJob.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jobId(Property.of("test-job-id"))
-            .expectedTerminalStates(Property.of(Arrays.asList("FINISHED", "CANCELED")))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue("test-job-id"))
+            .expectedTerminalStates(Property.ofValue(Arrays.asList("FINISHED", "CANCELED")))
             .build();
 
         assertThat(monitor.getExpectedTerminalStates(), notNullValue());
@@ -48,8 +48,8 @@ class MonitorJobTest {
         MonitorJob monitor = MonitorJob.builder()
             .id("test-monitor-defaults")
             .type(MonitorJob.class.getName())
-            .restUrl(Property.of("http://localhost:8081"))
-            .jobId(Property.of("test-job-id"))
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue("test-job-id"))
             .build();
 
         // Test that defaults are properly initialized for trigger
