@@ -1,32 +1,34 @@
 package io.kestra.plugin.flink;
 
+import java.net.URI;
+import java.time.Duration;
+import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.slf4j.Logger;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.property.Property;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.flows.State;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.models.flows.State;
 import io.kestra.core.utils.IdUtils;
-import java.util.Map;
-import java.util.Optional;
+
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
-
-import jakarta.validation.constraints.NotNull;
-import java.net.URI;
-import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
-import java.time.Duration;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @SuperBuilder
 @ToString
@@ -139,20 +141,24 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                     "success", isSuccess
                 );
 
-                return Optional.of(Execution.builder()
-                    .id(IdUtils.create())
-                    .namespace(conditionContext.getFlow().getNamespace())
-                    .flowId(conditionContext.getFlow().getId())
-                    .flowRevision(conditionContext.getFlow().getRevision())
-                    .state(new State())
-                    .variables(Map.of(
-                        "jobId", rJobId,
-                        "finalState", status.getState(),
-                        "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
-                        "success", isSuccess
-                    ))
-                    .outputs(triggerOutputs)
-                    .build());
+                return Optional.of(
+                    Execution.builder()
+                        .id(IdUtils.create())
+                        .namespace(conditionContext.getFlow().getNamespace())
+                        .flowId(conditionContext.getFlow().getId())
+                        .flowRevision(conditionContext.getFlow().getRevision())
+                        .state(new State())
+                        .variables(
+                            Map.of(
+                                "jobId", rJobId,
+                                "finalState", status.getState(),
+                                "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
+                                "success", isSuccess
+                            )
+                        )
+                        .outputs(triggerOutputs)
+                        .build()
+                );
             }
 
             // Job is not in terminal state, continue polling
@@ -177,7 +183,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     }
 
     private JobStatus getJobStatus(HttpClient client, String restUrl, String jobId)
-            throws Exception {
+        throws Exception {
 
         String normalizedUrl = restUrl.endsWith("/") ? restUrl.substring(0, restUrl.length() - 1) : restUrl;
         HttpRequest request = HttpRequest.builder()
@@ -220,12 +226,12 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     private boolean isTerminalState(String state) {
         return "FINISHED".equals(state) ||
-               "CANCELED".equals(state) ||
-               "FAILED".equals(state);
+            "CANCELED".equals(state) ||
+            "FAILED".equals(state);
     }
 
     private java.util.List<String> getExpectedTerminalStates(RunContext runContext)
-            throws IllegalVariableEvaluationException {
+        throws IllegalVariableEvaluationException {
         if (expectedTerminalStates != null) {
             return runContext.render(expectedTerminalStates).asList(String.class);
         }

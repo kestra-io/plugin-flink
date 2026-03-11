@@ -1,24 +1,8 @@
 package io.kestra.plugin.flink;
 
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.annotations.Example;
-import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.property.Property;
-import io.kestra.core.models.tasks.RunnableTask;
-import io.kestra.core.models.tasks.Task;
-import io.kestra.core.runners.RunContext;
-import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.*;
-import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
-
-import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,7 +10,25 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.Task;
+import io.kestra.core.runners.RunContext;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
 
 @SuperBuilder
 @ToString
@@ -158,9 +160,11 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
     }
 
     private String uploadJarToFlink(RunContext runContext, String restUrl, URI jarLocation) throws Exception {
-        try (HttpClient client = HttpClient.builder()
+        try (
+            HttpClient client = HttpClient.builder()
                 .runContext(runContext)
-                .build()) {
+                .build()
+        ) {
             java.nio.file.Path jarPath = java.nio.file.Paths.get(jarLocation);
             String fileName = jarPath.getFileName().toString();
 
@@ -185,9 +189,11 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
                 .uri(URI.create(restUrl + "/v1/jars/upload"))
                 .method("POST")
                 .addHeader("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .body(HttpRequest.ByteArrayRequestBody.builder()
-                    .content(fullBody)
-                    .build())
+                .body(
+                    HttpRequest.ByteArrayRequestBody.builder()
+                        .content(fullBody)
+                        .build()
+                )
                 .build();
 
             HttpResponse<String> response = client.request(request, String.class);
@@ -207,54 +213,58 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
     }
 
     private String submitJob(RunContext runContext, String restUrl, String jarId, String entryClass) throws Exception {
-        try (HttpClient client = HttpClient.builder()
+        try (
+            HttpClient client = HttpClient.builder()
                 .runContext(runContext)
-                .build()) {
+                .build()
+        ) {
 
-        // Build job submission payload
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("entryClass", entryClass);
+            // Build job submission payload
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("entryClass", entryClass);
 
-        if (parallelism != null) {
-            Integer parallelismValue = runContext.render(parallelism).as(Integer.class).orElse(null);
-            if (parallelismValue != null) {
-                payload.put("parallelism", parallelismValue);
+            if (parallelism != null) {
+                Integer parallelismValue = runContext.render(parallelism).as(Integer.class).orElse(null);
+                if (parallelismValue != null) {
+                    payload.put("parallelism", parallelismValue);
+                }
             }
-        }
 
-        if (args != null) {
-            List<String> renderedArgs = runContext.render(args).asList(String.class);
-            if (renderedArgs != null && !renderedArgs.isEmpty()) {
-                payload.put("programArgs", String.join(" ", renderedArgs));
+            if (args != null) {
+                List<String> renderedArgs = runContext.render(args).asList(String.class);
+                if (renderedArgs != null && !renderedArgs.isEmpty()) {
+                    payload.put("programArgs", String.join(" ", renderedArgs));
+                }
             }
-        }
 
-        if (restoreFromSavepoint != null) {
-            String savepointPath = runContext.render(restoreFromSavepoint).as(String.class).orElse(null);
-            if (savepointPath != null) {
-                payload.put("savepointPath", savepointPath);
-                Boolean allowNonRestored = runContext.render(allowNonRestoredState).as(Boolean.class).orElse(false);
-                payload.put("allowNonRestoredState", allowNonRestored);
+            if (restoreFromSavepoint != null) {
+                String savepointPath = runContext.render(restoreFromSavepoint).as(String.class).orElse(null);
+                if (savepointPath != null) {
+                    payload.put("savepointPath", savepointPath);
+                    Boolean allowNonRestored = runContext.render(allowNonRestoredState).as(Boolean.class).orElse(false);
+                    payload.put("allowNonRestoredState", allowNonRestored);
+                }
             }
-        }
 
-        if (jobConfig != null) {
-            Map<String, String> config = runContext.render(jobConfig).asMap(String.class, String.class);
-            if (config != null && !config.isEmpty()) {
-                payload.put("flinkConfiguration", config);
+            if (jobConfig != null) {
+                Map<String, String> config = runContext.render(jobConfig).asMap(String.class, String.class);
+                if (config != null && !config.isEmpty()) {
+                    payload.put("flinkConfiguration", config);
+                }
             }
-        }
 
-        ObjectMapper mapper = new ObjectMapper();
-        String requestBody = mapper.writeValueAsString(payload);
+            ObjectMapper mapper = new ObjectMapper();
+            String requestBody = mapper.writeValueAsString(payload);
 
             HttpRequest request = HttpRequest.builder()
                 .uri(URI.create(restUrl + "/v1/jars/" + jarId + "/run"))
                 .method("POST")
                 .addHeader("Content-Type", "application/json")
-                .body(HttpRequest.StringRequestBody.builder()
-                    .content(requestBody)
-                    .build())
+                .body(
+                    HttpRequest.StringRequestBody.builder()
+                        .content(requestBody)
+                        .build()
+                )
                 .build();
 
             HttpResponse<String> response = client.request(request, String.class);

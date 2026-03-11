@@ -1,30 +1,33 @@
 package io.kestra.plugin.flink;
 
+import java.net.URI;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.slf4j.Logger;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
+import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.core.utils.RetryUtils;
+
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
-
-import io.kestra.core.utils.RetryUtils;
-import io.kestra.core.models.tasks.retrys.Exponential;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kestra.core.serializers.JacksonMapper;
-import jakarta.validation.constraints.NotNull;
-import java.net.URI;
-import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -155,7 +158,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private String triggerSavepoint(RunContext runContext, HttpClient client, String restUrl, String jobId)
-            throws Exception {
+        throws Exception {
 
         String savepointDirectory = null;
         if (savepointDir != null) {
@@ -175,9 +178,11 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
             .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints"))
             .method("POST")
             .addHeader("Content-Type", "application/json")
-            .body(HttpRequest.StringRequestBody.builder()
-                .content(payload)
-                .build())
+            .body(
+                HttpRequest.StringRequestBody.builder()
+                    .content(payload)
+                    .build()
+            )
             .build();
 
         HttpResponse<String> response = client.request(request, String.class);
@@ -192,7 +197,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private String cancelJob(RunContext runContext, HttpClient client, String restUrl, String jobId, boolean drain)
-            throws Exception {
+        throws Exception {
 
         String endpoint = drain ? "/v1/jobs/" + jobId + "/stop" : "/v1/jobs/" + jobId;
 
@@ -203,9 +208,11 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 .uri(URI.create(restUrl + endpoint))
                 .method("POST")
                 .addHeader("Content-Type", "application/json")
-                .body(HttpRequest.StringRequestBody.builder()
-                    .content("{\"drain\":true}")
-                    .build())
+                .body(
+                    HttpRequest.StringRequestBody.builder()
+                        .content("{\"drain\":true}")
+                        .build()
+                )
                 .build();
         } else {
             // For regular cancel, we DELETE
@@ -225,14 +232,14 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private void waitForJobCancellation(RunContext runContext, HttpClient client, String restUrl, String jobId)
-            throws Exception {
+        throws Exception {
 
         int timeoutSeconds = Math.max(1, runContext.render(cancellationTimeout).as(Integer.class).orElse(60));
         final int intervalSec = 2;
         final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec));
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
-        RetryUtils.<Boolean, Exception>of(
+        RetryUtils.<Boolean, Exception> of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
                 .interval(Duration.ofSeconds(intervalSec))
@@ -240,15 +247,20 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
-            (result, throwable) -> {
-                if (result != null && result) return false;
-                if (throwable instanceof NonRetriableCancellationException ||
-                    throwable instanceof java.util.concurrent.TimeoutException) {
+            (result, throwable) ->
+            {
+                if (result != null && result)
+                    return false;
+                if (
+                    throwable instanceof NonRetriableCancellationException ||
+                        throwable instanceof java.util.concurrent.TimeoutException
+                ) {
                     return false;
                 }
                 return true; // retry other exceptions
             },
-            () -> {
+            () ->
+            {
                 // Hard-stop if global timeout elapsed
                 if (java.time.Instant.now().isAfter(deadline)) {
                     throw new java.util.concurrent.TimeoutException("Job cancellation timed out after " + timeoutSeconds + " seconds");
@@ -286,12 +298,12 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private String waitForSavepointCompletion(RunContext runContext, HttpClient client, String restUrl,
-                                            String jobId, String requestId) throws Exception {
+        String jobId, String requestId) throws Exception {
 
         int timeoutSeconds = 300; // 5 minutes for savepoint
         int maxAttempts = timeoutSeconds / 5; // Check every 5 seconds
 
-        return RetryUtils.<String, Exception>of(
+        return RetryUtils.<String, Exception> of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
                 .interval(Duration.ofSeconds(5))
@@ -299,7 +311,8 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
-            (result, throwable) -> {
+            (result, throwable) ->
+            {
                 // Don't retry if we got a successful result
                 if (result != null) {
                     return false;
@@ -314,7 +327,8 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 // Retry on other cases
                 return true;
             },
-            () -> {
+            () ->
+            {
                 HttpRequest request = HttpRequest.builder()
                     .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
                     .method("GET")
@@ -422,10 +436,14 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private static final class NonRetriableCancellationException extends RuntimeException {
-        NonRetriableCancellationException(String message) { super(message); }
+        NonRetriableCancellationException(String message) {
+            super(message);
+        }
     }
 
     private static final class NonRetriableSavepointException extends RuntimeException {
-        NonRetriableSavepointException(String message) { super(message); }
+        NonRetriableSavepointException(String message) {
+            super(message);
+        }
     }
 }

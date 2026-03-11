@@ -1,28 +1,31 @@
 package io.kestra.plugin.flink;
 
+import java.net.URI;
+import java.time.Duration;
+
+import org.slf4j.Logger;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
+import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.utils.RetryUtils;
+
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
-
-import io.kestra.core.utils.RetryUtils;
-import io.kestra.core.models.tasks.retrys.Exponential;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.validation.constraints.NotNull;
-import java.net.URI;
-import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
-import java.time.Duration;
 
 @SuperBuilder
 @ToString
@@ -137,7 +140,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     }
 
     private String triggerSavepoint(RunContext runContext, HttpClient client, String restUrl, String jobId, boolean cancelJob)
-            throws Exception {
+        throws Exception {
 
         ObjectNode payload = JSON.createObjectNode();
 
@@ -159,9 +162,11 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints"))
             .method("POST")
             .addHeader("Content-Type", "application/json")
-            .body(HttpRequest.StringRequestBody.builder()
-                .content(body)
-                .build())
+            .body(
+                HttpRequest.StringRequestBody.builder()
+                    .content(body)
+                    .build()
+            )
             .build();
 
         HttpResponse<String> response = client.request(request, String.class);
@@ -175,14 +180,14 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     }
 
     private String waitForSavepointCompletion(RunContext runContext, HttpClient client, String restUrl,
-                                            String jobId, String requestId) throws Exception {
+        String jobId, String requestId) throws Exception {
 
         int timeoutSeconds = Math.max(1, runContext.render(savepointTimeout).as(Integer.class).orElse(300));
         final int intervalSec = 5;
         final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
-        return RetryUtils.<String, Exception>of(
+        return RetryUtils.<String, Exception> of(
             Exponential.builder()
                 .delayFactor(1.0) // Fixed interval
                 .interval(Duration.ofSeconds(intervalSec))
@@ -190,15 +195,20 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
-            (result, throwable) -> {
-                if (result != null) return false;
-                if (throwable instanceof NonRetriableSavepointException ||
-                    throwable instanceof java.util.concurrent.TimeoutException) {
+            (result, throwable) ->
+            {
+                if (result != null)
+                    return false;
+                if (
+                    throwable instanceof NonRetriableSavepointException ||
+                        throwable instanceof java.util.concurrent.TimeoutException
+                ) {
                     return false;
                 }
                 return true; // retry other exceptions (I/O, timeouts, transient HTTP)
             },
-            () -> {
+            () ->
+            {
                 // Hard-stop if global timeout elapsed (enforces wall-clock budget)
                 if (java.time.Instant.now().isAfter(deadline)) {
                     throw new java.util.concurrent.TimeoutException("Timed out waiting for savepoint completion after " + timeoutSeconds + "s");
@@ -296,7 +306,9 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     }
 
     private static final class NonRetriableSavepointException extends RuntimeException {
-        NonRetriableSavepointException(String message) { super(message); }
+        NonRetriableSavepointException(String message) {
+            super(message);
+        }
     }
 
     @Builder

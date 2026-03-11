@@ -1,34 +1,36 @@
 package io.kestra.plugin.flink;
 
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.annotations.Example;
-import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.property.Property;
-import io.kestra.core.models.tasks.RunnableTask;
-import io.kestra.core.models.tasks.Task;
-import io.kestra.core.runners.RunContext;
-import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.*;
-import lombok.experimental.SuperBuilder;
+import java.io.IOException;
+import java.net.URI;
+import java.time.Duration;
+import java.util.Map;
+
 import org.slf4j.Logger;
 
-import io.kestra.core.utils.RetryUtils;
-import io.kestra.core.models.tasks.retrys.Exponential;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import jakarta.validation.constraints.NotNull;
-import java.io.IOException;
-import java.net.URI;
-import io.kestra.core.http.client.HttpClient;
+
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
-import java.time.Duration;
-import java.util.Map;
-
-import io.kestra.core.models.enums.MonacoLanguages;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.enums.MonacoLanguages;
+import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.Task;
+import io.kestra.core.models.tasks.retrys.Exponential;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.utils.RetryUtils;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
 
 @SuperBuilder
 @ToString
@@ -155,8 +157,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         String sessionHandle = createOrGetSession(runContext, rGatewayUrl);
 
         // Render sessionName before try block to avoid exception suppression in finally
-        String sessionName = this.sessionName != null ?
-            runContext.render(this.sessionName).as(String.class).orElse(null) : null;
+        String sessionName = this.sessionName != null ? runContext.render(this.sessionName).as(String.class).orElse(null) : null;
 
         OperationResult result = null;
         boolean keepSessionOpen = false;
@@ -187,14 +188,13 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     }
 
     private String createOrGetSession(RunContext runContext, String gatewayUrl)
-            throws Exception {
+        throws Exception {
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
             .build();
 
-        String sessionName = this.sessionName != null ?
-            runContext.render(this.sessionName).as(String.class).orElse(null) : null;
+        String sessionName = this.sessionName != null ? runContext.render(this.sessionName).as(String.class).orElse(null) : null;
 
         if (sessionName != null) {
             // List existing sessions to find one with matching name
@@ -238,9 +238,11 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             .uri(URI.create(gatewayUrl + "/v1/sessions"))
             .method("POST")
             .addHeader("Content-Type", "application/json")
-            .body(HttpRequest.StringRequestBody.builder()
-                .content(JSON.writeValueAsString(payload))
-                .build())
+            .body(
+                HttpRequest.StringRequestBody.builder()
+                    .content(JSON.writeValueAsString(payload))
+                    .build()
+            )
             .build();
 
         HttpResponse<String> response = client.request(request, String.class);
@@ -256,7 +258,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     }
 
     private String executeStatement(RunContext runContext, String gatewayUrl, String sessionHandle, String statement)
-            throws Exception {
+        throws Exception {
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
@@ -268,9 +270,11 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle + "/statements"))
             .method("POST")
             .addHeader("Content-Type", "application/json")
-            .body(HttpRequest.StringRequestBody.builder()
-                .content(JSON.writeValueAsString(payload))
-                .build())
+            .body(
+                HttpRequest.StringRequestBody.builder()
+                    .content(JSON.writeValueAsString(payload))
+                    .build()
+            )
             .build();
 
         HttpResponse<String> response = client.request(request, String.class);
@@ -283,8 +287,8 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     }
 
     private OperationResult waitForOperationCompletion(RunContext runContext, String gatewayUrl,
-                                                       String sessionHandle, String operationHandle)
-            throws IOException, InterruptedException, IllegalVariableEvaluationException {
+        String sessionHandle, String operationHandle)
+        throws IOException, InterruptedException, IllegalVariableEvaluationException {
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
@@ -296,22 +300,27 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeout);
 
         try {
-            return RetryUtils.<OperationResult, Exception>of(
+            return RetryUtils.<OperationResult, Exception> of(
                 Exponential.builder()
                     .interval(Duration.ofSeconds(intervalSec))
                     .maxInterval(Duration.ofMinutes(1))
                     .maxAttempts(maxAttempts)
                     .build()
             ).run(
-                (result, throwable) -> {
-                    if (result != null) return false;
-                    if (throwable instanceof NonRetriableOperationException ||
-                        throwable instanceof java.util.concurrent.TimeoutException) {
+                (result, throwable) ->
+                {
+                    if (result != null)
+                        return false;
+                    if (
+                        throwable instanceof NonRetriableOperationException ||
+                            throwable instanceof java.util.concurrent.TimeoutException
+                    ) {
                         return false;
                     }
                     return true; // retry other exceptions
                 },
-                () -> {
+                () ->
+                {
                     // Hard-stop if global timeout elapsed
                     if (java.time.Instant.now().isAfter(deadline)) {
                         throw new java.util.concurrent.TimeoutException("Operation timed out after " + timeout + " seconds");
@@ -467,7 +476,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     }
 
     private java.util.List<String> getAcceptableStates(RunContext runContext)
-            throws IllegalVariableEvaluationException {
+        throws IllegalVariableEvaluationException {
         if (acceptableStates != null) {
             return runContext.render(acceptableStates).asList(String.class);
         }
@@ -523,6 +532,8 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     }
 
     private static final class NonRetriableOperationException extends RuntimeException {
-        NonRetriableOperationException(String message) { super(message); }
+        NonRetriableOperationException(String message) {
+            super(message);
+        }
     }
 }
