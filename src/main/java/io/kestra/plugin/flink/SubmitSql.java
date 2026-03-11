@@ -127,14 +127,14 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         description = "Connection timeout in seconds; defaults to 30."
     )
     @Builder.Default
-    private Property<Integer> connectionTimeout = Property.of(30);
+    private Property<Integer> connectionTimeout = Property.ofValue(30);
 
     @Schema(
         title = "Statement timeout",
         description = "Execution timeout in seconds for the SQL statement; defaults to 300."
     )
     @Builder.Default
-    private Property<Integer> statementTimeout = Property.of(300);
+    private Property<Integer> statementTimeout = Property.ofValue(300);
 
     @Schema(
         title = "Acceptable terminal states",

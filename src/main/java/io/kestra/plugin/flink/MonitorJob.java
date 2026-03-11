@@ -86,14 +86,14 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         description = "Interval between job status checks (ISO-8601 duration, e.g., PT30S). Defaults to PT10S."
     )
     @Builder.Default
-    private Property<Duration> interval = Property.of(Duration.parse("PT10S"));
+    private Property<Duration> interval = Property.ofValue(Duration.parse("PT10S"));
 
     @Schema(
         title = "Fail on error",
         description = "Fail the trigger when the job reaches FAILED. If false, trigger still fires with success=false; defaults to true."
     )
     @Builder.Default
-    private Property<Boolean> failOnError = Property.of(true);
+    private Property<Boolean> failOnError = Property.ofValue(true);
 
     @Schema(
         title = "Expected terminal states",
