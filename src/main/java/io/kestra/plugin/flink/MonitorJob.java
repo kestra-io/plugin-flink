@@ -29,6 +29,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -74,6 +75,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         description = "Base URL of the Flink REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> restUrl;
 
     @Schema(
@@ -81,6 +83,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         description = "ID of the Flink job to monitor."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> jobId;
 
     @Schema(
@@ -88,6 +91,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         description = "Interval between job status checks (ISO-8601 duration, e.g., PT30S). Defaults to PT10S."
     )
     @Builder.Default
+    @PluginProperty(group = "execution")
     private Property<Duration> interval = Property.ofValue(Duration.parse("PT10S"));
 
     @Schema(
@@ -95,6 +99,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         description = "Fail the trigger when the job reaches FAILED. If false, trigger still fires with success=false; defaults to true."
     )
     @Builder.Default
+    @PluginProperty(group = "reliability")
     private Property<Boolean> failOnError = Property.ofValue(true);
 
     @Schema(

@@ -28,6 +28,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -83,6 +84,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "Base URL of the Flink REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> restUrl;
 
     @Schema(
@@ -90,6 +92,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "ID of the Flink job to cancel."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> jobId;
 
     @Schema(
@@ -97,12 +100,14 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "Trigger a savepoint before cancelling the job; defaults to false."
     )
     @Builder.Default
+    @PluginProperty(group = "destination")
     private Property<Boolean> withSavepoint = Property.ofValue(false);
 
     @Schema(
         title = "Savepoint directory",
         description = "Target directory for the savepoint; required when withSavepoint is true."
     )
+    @PluginProperty(group = "destination")
     private Property<String> savepointDir;
 
     @Schema(
@@ -110,6 +115,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "Drain streaming input before stopping. Applicable to streaming jobs only; defaults to false."
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<Boolean> drainJob = Property.ofValue(false);
 
     @Schema(
@@ -117,6 +123,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         description = "Maximum time to wait for cancellation completion in seconds; defaults to 60."
     )
     @Builder.Default
+    @PluginProperty(group = "execution")
     private Property<Integer> cancellationTimeout = Property.ofValue(60);
 
     @Override

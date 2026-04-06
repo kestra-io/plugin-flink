@@ -29,6 +29,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -71,6 +72,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "Base URL of the Flink cluster REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
+    @PluginProperty(group = "main")
     protected Property<String> restUrl;
 
     @Schema(
@@ -78,6 +80,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "URI of the job JAR to upload. Supports file://, kestra://, s3://, http:// and other schemes. Large artifacts are read fully into memory during upload."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> jarUri;
 
     @Schema(
@@ -85,24 +88,28 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "Fully qualified entry class inside the JAR."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> entryClass;
 
     @Schema(
         title = "Program arguments",
         description = "Arguments passed to the main method; rendered then space-joined."
     )
+    @PluginProperty(group = "advanced")
     private Property<List<String>> args;
 
     @Schema(
         title = "Job parallelism",
         description = "Parallelism to use for this job; defaults to the Flink cluster setting when absent."
     )
+    @PluginProperty(group = "execution")
     private Property<Integer> parallelism;
 
     @Schema(
         title = "Restore from savepoint",
         description = "Path to a savepoint used to start the job statefully."
     )
+    @PluginProperty(group = "source")
     private Property<String> restoreFromSavepoint;
 
     @Schema(
@@ -110,12 +117,14 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         description = "Skip savepoint state that cannot be restored; defaults to false and used only when restoreFromSavepoint is set."
     )
     @Builder.Default
+    @PluginProperty(group = "destination")
     private Property<Boolean> allowNonRestoredState = Property.ofValue(false);
 
     @Schema(
         title = "Job configuration",
         description = "Additional Flink configuration key/values merged into the run request."
     )
+    @PluginProperty(group = "advanced")
     private Property<Map<String, String>> jobConfig;
 
     @Override
