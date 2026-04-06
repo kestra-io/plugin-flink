@@ -26,6 +26,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -74,6 +75,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Base URL of the Flink REST API (e.g., `http://flink-jobmanager:8081`)."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> restUrl;
 
     @Schema(
@@ -81,12 +83,14 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "ID of the Flink job to snapshot."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> jobId;
 
     @Schema(
         title = "Target directory",
         description = "Target directory for the savepoint; falls back to the cluster default when omitted."
     )
+    @PluginProperty(group = "destination")
     private Property<String> targetDirectory;
 
     @Schema(
@@ -94,6 +98,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Cancel the job after the savepoint completes; defaults to false."
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<Boolean> cancelJob = Property.ofValue(false);
 
     @Schema(
@@ -101,6 +106,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Maximum wait time for savepoint completion in seconds; defaults to 300."
     )
     @Builder.Default
+    @PluginProperty(group = "execution")
     private Property<Integer> savepointTimeout = Property.ofValue(300);
 
     @Schema(
@@ -108,6 +114,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         description = "Savepoint format type: CANONICAL or NATIVE. Defaults to CANONICAL for broader compatibility."
     )
     @Builder.Default
+    @PluginProperty(group = "processing")
     private Property<String> formatType = Property.ofValue("CANONICAL");
 
     @Override

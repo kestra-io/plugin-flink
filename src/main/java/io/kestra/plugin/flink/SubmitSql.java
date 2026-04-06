@@ -102,6 +102,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         description = "Base URL of the Flink SQL Gateway (e.g., `http://flink-sql-gateway:8083`)."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<String> gatewayUrl;
 
     @Schema(
@@ -109,19 +110,21 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         description = "SQL statement to execute; supports DDL and DML."
     )
     @NotNull
-    @PluginProperty(language = MonacoLanguages.SQL)
+    @PluginProperty(language = MonacoLanguages.SQL, group = "main")
     private Property<String> statement;
 
     @Schema(
         title = "Session name",
         description = "Optional session name; a temporary session is created when omitted."
     )
+    @PluginProperty(group = "advanced")
     private Property<String> sessionName;
 
     @Schema(
         title = "Session configuration",
         description = "Session options such as catalog, database, and configuration properties applied before execution."
     )
+    @PluginProperty(group = "advanced")
     private Property<SessionConfig> sessionConfig;
 
     @Schema(
@@ -129,6 +132,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         description = "Connection timeout in seconds; defaults to 30."
     )
     @Builder.Default
+    @PluginProperty(group = "connection")
     private Property<Integer> connectionTimeout = Property.ofValue(30);
 
     @Schema(
@@ -136,6 +140,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         description = "Execution timeout in seconds for the SQL statement; defaults to 300."
     )
     @Builder.Default
+    @PluginProperty(group = "execution")
     private Property<Integer> statementTimeout = Property.ofValue(300);
 
     @Schema(
