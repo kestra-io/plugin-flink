@@ -2,11 +2,13 @@
 
 ## What
 
-description = 'Apache Flink plugin for Kestra Exposes 5 plugin components (tasks, triggers, and/or conditions).
+- Provides plugin components under `io.kestra.plugin.flink`.
+- Includes classes such as `MonitorJob`, `CancelJob`, `TriggerSavepoint`, `Submit`.
 
 ## Why
 
-Enables Kestra workflows to interact with Apache Flink, allowing orchestration of Apache Flink-based operations as part of data pipelines and automation workflows.
+- This plugin integrates Kestra with Apache Flink.
+- It provides tasks that submit, monitor, cancel, and trigger savepoints for Apache Flink jobs over the REST API.
 
 ## How
 
@@ -40,24 +42,7 @@ plugin-flink/
 └── README.md
 ```
 
-### Important Commands
+## References
 
-```bash
-# Build the plugin
-./gradlew shadowJar
-
-# Run tests
-./gradlew test
-
-# Build without tests
-./gradlew shadowJar -x test
-```
-
-### Configuration
-
-All tasks and triggers accept standard Kestra plugin properties. Credentials should use
-`{{ secret('SECRET_NAME') }}` — never hardcode real values.
-
-## Agents
-
-**IMPORTANT:** This is a Kestra plugin repository (prefixed by `plugin-`, `storage-`, or `secret-`). You **MUST** delegate all coding tasks to the `kestra-plugin-developer` agent. Do NOT implement code changes directly — always use this agent.
+- https://kestra.io/docs/plugin-developer-guide
+- https://kestra.io/docs/plugin-developer-guide/contribution-guidelines
