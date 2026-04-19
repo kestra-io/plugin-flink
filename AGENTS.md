@@ -7,8 +7,9 @@
 
 ## Why
 
-- This plugin integrates Kestra with Apache Flink.
-- It provides tasks that submit, monitor, cancel, and trigger savepoints for Apache Flink jobs over the REST API.
+- What user problem does this solve? Teams need to submit, monitor, cancel, and trigger savepoints for Apache Flink jobs over the REST API from orchestrated workflows instead of relying on manual console work, ad hoc scripts, or disconnected schedulers.
+- Why would a team adopt this plugin in a workflow? It keeps Apache Flink steps in the same Kestra flow as upstream preparation, approvals, retries, notifications, and downstream systems.
+- What operational/business outcome does it enable? It reduces manual handoffs and fragmented tooling while improving reliability, traceability, and delivery speed for processes that depend on Apache Flink.
 
 ## How
 
