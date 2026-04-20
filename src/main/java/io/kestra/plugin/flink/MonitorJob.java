@@ -62,7 +62,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 
                 tasks:
                   - id: notify-completion
-                    type: io.kestra.core.tasks.log.Log
+                    type: io.kestra.plugin.core.log.Log
                     message: "Flink job {{ trigger.jobId }} reached state: {{ trigger.finalState }}"
                 """
         )
