@@ -57,11 +57,16 @@ import io.kestra.core.models.annotations.PluginProperty;
         ),
         @Example(
             title = "Trigger savepoint with default directory",
+            full = true,
             code = """
                 id: default-savepoint
-                type: io.kestra.plugin.flink.TriggerSavepoint
-                restUrl: "http://flink-jobmanager:8081"
-                jobId: "{{ inputs.jobId }}"
+                namespace: company.team
+
+                tasks:
+                  - id: trigger-savepoint
+                    type: io.kestra.plugin.flink.TriggerSavepoint
+                    restUrl: "http://flink-jobmanager:8081"
+                    jobId: "{{ inputs.jobId }}"
                 """
         )
     }
