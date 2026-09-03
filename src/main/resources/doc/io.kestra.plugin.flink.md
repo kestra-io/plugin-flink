@@ -4,7 +4,7 @@ Submit and manage Flink jobs via the JobManager REST API from Kestra flows.
 
 ## Authentication
 
-Set `restUrl` to the Flink JobManager REST endpoint (e.g. `http://jobmanager:8081`) on each task, or apply it globally with [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults). The plugin communicates over plain HTTP — no built-in auth fields. If your cluster requires authentication, place a reverse proxy in front of the JobManager.
+Set `restUrl` to the Flink JobManager REST endpoint (e.g. `http://jobmanager:8081`) on each task. The plugin communicates over plain HTTP — no built-in auth fields. If your cluster requires authentication, place a reverse proxy in front of the JobManager.
 
 ## Tasks
 
