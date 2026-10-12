@@ -2,11 +2,20 @@ package io.kestra.plugin.flink;
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.flink.api.common.JobID;
+import org.apache.flink.client.deployment.StandaloneClusterId;
+import org.apache.flink.client.program.rest.RestClusterClient;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestOptions;
+import org.apache.flink.configuration.SecurityOptions;
+import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
+import org.apache.flink.runtime.rest.util.RestClientException;
 import org.slf4j.Logger;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
@@ -15,6 +24,7 @@ import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.flows.State;
@@ -29,7 +39,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -49,11 +58,16 @@ import io.kestra.core.models.annotations.PluginProperty;
                 id: flink-job-monitor
                 namespace: company.team
 
+                inputs:
+                  - id: jobId
+                    type: STRING
+                    required: true
+
                 triggers:
                   - id: job-monitor
                     type: io.kestra.plugin.flink.MonitorJob
                     restUrl: "http://flink-jobmanager:8081"
-                    jobId: "my-job-id-12345"
+                    jobId: "{{ inputs.jobId }}"
                     interval: "PT30S"
                     expectedTerminalStates:
                       - "FINISHED"
@@ -64,6 +78,9 @@ import io.kestra.core.models.annotations.PluginProperty;
                   - id: notify-completion
                     type: io.kestra.plugin.core.log.Log
                     message: "Flink job {{ trigger.jobId }} reached state: {{ trigger.finalState }}"
+
+                # jobId must be a valid hexadecimal Flink JobID for an existing job.
+                # The Flink JobManager must be reachable by this trigger.
                 """
         )
     }
@@ -88,7 +105,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     @Schema(
         title = "Polling interval",
-        description = "Interval between job status checks (ISO-8601 duration, e.g., PT30S). Defaults to PT10S."
+        description = "Interval between job status checks (static ISO-8601 duration, e.g., PT30S). Defaults to PT10S."
     )
     @Builder.Default
     @PluginProperty(group = "execution")
@@ -106,6 +123,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         title = "Expected terminal states",
         description = "Job states treated as success. Defaults to ['FINISHED']."
     )
+    @PluginProperty(group = "execution")
     private Property<java.util.List<String>> expectedTerminalStates;
 
     @Override
@@ -120,11 +138,27 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         logger.debug("Polling Flink job status: {}", rJobId);
 
         try {
-            HttpClient client = HttpClient.builder()
-                .runContext(runContext)
-                .build();
+            Configuration configuration = createConfiguration(rRestUrl);
+            JobID flinkJobId = JobID.fromHexString(rJobId);
+            JobStatus status;
+            try (
+                RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
+            ) {
+                org.apache.flink.api.common.JobStatus flinkStatus;
+                try {
+                    flinkStatus = client.getJobStatus(flinkJobId).get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
 
-            JobStatus status = getJobStatus(client, rRestUrl, rJobId);
+                String state = flinkStatus.name();
+                String stateDetails = isTerminalState(state) ? getStateDetails(runContext, rRestUrl, rJobId) : null;
+                status = JobStatus.builder()
+                    .state(state)
+                    .stateDetails(stateDetails)
+                    .build();
+            }
             logger.debug("Job {} current status: {}", rJobId, status.getState());
 
             if (isTerminalState(status.getState())) {
@@ -169,7 +203,13 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
             // Job is not in terminal state, continue polling
             return Optional.empty();
 
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
         } catch (Exception e) {
+            if (isJobNotFound(e)) {
+                throw new RuntimeException("Job not found: " + rJobId, e);
+            }
             logger.error("Failed to check job status for {}", rJobId, e);
             // For transient errors (IOException, timeouts), continue polling
             // For permanent errors (404, invalid URL), fail fast
@@ -182,42 +222,101 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     @Override
     public Duration getInterval() {
-        // For triggers, interval is typically static, so we use the default
-        // The actual rendered value will be used during evaluation
-        return Duration.parse("PT10S");
+        if (interval == null) {
+            return Duration.parse("PT10S");
+        }
+        String configuredInterval = interval.toString();
+        if (configuredInterval.contains("{")) {
+            return Duration.parse("PT10S");
+        }
+        try {
+            return Duration.parse(configuredInterval);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("interval must be an ISO-8601 duration: " + configuredInterval, e);
+        }
     }
 
-    private JobStatus getJobStatus(HttpClient client, String restUrl, String jobId)
-        throws Exception {
+    String getStateDetails(RunContext runContext, String restUrl, String jobId) throws Exception {
+        try (
+            HttpClient client = HttpClient.builder()
+                .runContext(runContext)
+                .build()
+        ) {
+            HttpRequest request = HttpRequest.builder()
+                .uri(URI.create(restEndpoint(restUrl, "/v1/jobs/" + jobId)))
+                .method("GET")
+                .build();
 
-        String normalizedUrl = restUrl.endsWith("/") ? restUrl.substring(0, restUrl.length() - 1) : restUrl;
-        HttpRequest request = HttpRequest.builder()
-            .uri(URI.create(normalizedUrl + "/v1/jobs/" + jobId))
-            .method("GET")
-            .build();
-
-        HttpResponse<String> response = client.request(request, String.class);
-
-        if (response.getStatus().getCode() == 404) {
-            throw new RuntimeException("Job not found: " + jobId);
+            HttpResponse<String> response = client.request(request, String.class);
+            if (response.getStatus().getCode() == 404) {
+                return null;
+            }
+            if (response.getStatus().getCode() != 200) {
+                throw new RuntimeException(
+                    "Failed to get job status: " + response.getStatus().getCode() + " - " + response.getBody()
+                );
+            }
+            return extractJsonValue(response.getBody(), "state-details");
         }
-
-        if (response.getStatus().getCode() != 200) {
-            throw new RuntimeException("Failed to get job status: " + response.getStatus().getCode() + " - " + response.getBody());
-        }
-
-        return parseJobStatus(response.getBody());
     }
 
-    private JobStatus parseJobStatus(String responseBody) {
-        // Simple JSON parsing - in production, would use proper JSON parser
-        String state = extractJsonValue(responseBody, "state");
-        String stateDetails = extractJsonValue(responseBody, "state-details");
+    private Configuration createConfiguration(String restUrl) {
+        URI restUri = validateRestUrl(restUrl);
+        Configuration configuration = new Configuration();
+        configuration.set(RestOptions.ADDRESS, restUri.getHost());
+        configuration.set(RestOptions.PORT, restUri.getPort() < 0 ? RestOptions.PORT.defaultValue() : restUri.getPort());
 
-        return JobStatus.builder()
-            .state(state)
-            .stateDetails(stateDetails)
-            .build();
+        String path = restUri.getPath();
+        if (path != null) {
+            path = path.replaceFirst("/+$", "");
+        }
+        if (path != null && !path.isEmpty()) {
+            configuration.set(RestOptions.PATH, path);
+        }
+        if ("https".equalsIgnoreCase(restUri.getScheme())) {
+            configuration.set(SecurityOptions.SSL_REST_ENABLED, true);
+        }
+        return configuration;
+    }
+
+    private String restEndpoint(String restUrl, String endpoint) {
+        URI restUri = validateRestUrl(restUrl);
+        String baseUrl = restUrl;
+        if (restUri.getPort() < 0) {
+            String path = restUri.getRawPath();
+            baseUrl = restUri.getScheme() + "://" + restUri.getRawAuthority() + ":" + RestOptions.PORT.defaultValue()
+                + (path == null ? "" : path);
+        }
+        return baseUrl.replaceFirst("/+$", "") + endpoint;
+    }
+
+    private URI validateRestUrl(String restUrl) {
+        URI restUri = URI.create(restUrl);
+        String scheme = restUri.getScheme();
+        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
+        }
+        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
+            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
+        }
+        return restUri;
+    }
+
+    private boolean isJobNotFound(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause != null) {
+            if (cause instanceof FlinkJobNotFoundException) {
+                return true;
+            }
+            if (cause instanceof RestClientException restException && restException.getHttpResponseStatus().code() == 404) {
+                return true;
+            }
+            if (cause.getMessage() != null && cause.getMessage().contains("Job not found")) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     private String extractJsonValue(String json, String key) {

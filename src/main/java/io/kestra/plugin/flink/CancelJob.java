@@ -2,33 +2,37 @@ package io.kestra.plugin.flink;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
+import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.client.deployment.StandaloneClusterId;
+import org.apache.flink.client.program.rest.RestClusterClient;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestOptions;
+import org.apache.flink.configuration.SecurityOptions;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
+import org.apache.flink.runtime.rest.util.RestClientException;
 import org.slf4j.Logger;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
-import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.RetryUtils;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -48,6 +52,11 @@ import io.kestra.core.models.annotations.PluginProperty;
                 id: cancel-flink-job
                 namespace: company.team
 
+                inputs:
+                  - id: jobId
+                    type: STRING
+                    required: true
+
                 tasks:
                   - id: cancel-job
                     type: io.kestra.plugin.flink.CancelJob
@@ -56,6 +65,9 @@ import io.kestra.core.models.annotations.PluginProperty;
                     withSavepoint: true
                     savepointDir: "s3://flink/savepoints/canceled/{{ execution.id }}"
                     drainJob: true
+
+                # jobId must be a valid Flink JobID and the Flink JobManager must be reachable.
+                # The savepoint path requires Flink filesystem support and storage access permissions.
                 """
         ),
         @Example(
@@ -65,19 +77,24 @@ import io.kestra.core.models.annotations.PluginProperty;
                 id: force-cancel-job
                 namespace: company.team
 
+                inputs:
+                  - id: jobId
+                    type: STRING
+                    required: true
+
                 tasks:
                   - id: force-cancel
                     type: io.kestra.plugin.flink.CancelJob
                     restUrl: "http://flink-jobmanager:8081"
                     jobId: "{{ inputs.jobId }}"
                     withSavepoint: false
+
+                # jobId must be a valid Flink JobID and the Flink JobManager must be reachable.
                 """
         )
     }
 )
 public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
-
-    private static final ObjectMapper OBJECT_MAPPER = JacksonMapper.ofJson();
 
     @Schema(
         title = "Flink REST API URL",
@@ -134,123 +151,126 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean withSp = runContext.render(this.withSavepoint).as(Boolean.class).orElse(false);
         Boolean drain = runContext.render(this.drainJob).as(Boolean.class).orElse(false);
+        int timeoutSeconds = Math.max(1, runContext.render(cancellationTimeout).as(Integer.class).orElse(60));
 
         logger.info("Cancelling Flink job: {} (withSavepoint: {}, drain: {})", rJobId, withSp, drain);
 
-        HttpClient client = HttpClient.builder()
-            .runContext(runContext)
-            .build();
+        JobID flinkJobId = JobID.fromHexString(rJobId);
+        Configuration configuration = createConfiguration(rRestUrl);
 
-        String savepointPath = null;
+        try (
+            RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
+        ) {
+            String savepointPath = null;
+            boolean cancelledWithSavepoint = withSp && !drain;
 
-        if (withSp) {
-            // Trigger savepoint before cancellation
-            savepointPath = triggerSavepoint(runContext, client, rRestUrl, rJobId);
-            logger.info("Savepoint created at: {}", savepointPath);
+            if (withSp) {
+                if (cancelledWithSavepoint) {
+                    savepointPath = cancelWithSavepoint(runContext, client, flinkJobId);
+                    logger.info("Savepoint created at: {}", savepointPath);
+                } else {
+                    savepointPath = triggerSavepoint(runContext, client, flinkJobId);
+                    logger.info("Savepoint created at: {}", savepointPath);
+                }
+            }
+
+            String cancellationResult = "Job cancellation requested";
+            if (!cancelledWithSavepoint) {
+                cancellationResult = cancelJob(client, flinkJobId, drain, timeoutSeconds);
+            }
+
+            if (!drain) {
+                waitForJobCancellation(runContext, client, flinkJobId, timeoutSeconds);
+            }
+
+            logger.info("Successfully cancelled job: {}", rJobId);
+
+            return Output.builder()
+                .jobId(rJobId)
+                .savepointPath(savepointPath)
+                .cancellationResult(cancellationResult)
+                .build();
         }
-
-        // Cancel the job
-        String cancellationResult = cancelJob(runContext, client, rRestUrl, rJobId, drain);
-
-        // Wait for job to be canceled
-        waitForJobCancellation(runContext, client, rRestUrl, rJobId);
-
-        logger.info("Successfully cancelled job: {}", rJobId);
-
-        return Output.builder()
-            .jobId(rJobId)
-            .savepointPath(savepointPath)
-            .cancellationResult(cancellationResult)
-            .build();
     }
 
-    private String triggerSavepoint(RunContext runContext, HttpClient client, String restUrl, String jobId)
+    private String triggerSavepoint(RunContext runContext, RestClusterClient<StandaloneClusterId> client, JobID jobId)
         throws Exception {
-
-        String savepointDirectory = null;
-        if (savepointDir != null) {
-            savepointDirectory = runContext.render(savepointDir).as(String.class).orElse(null);
+        String savepointDirectory = getSavepointDirectory(runContext);
+        try {
+            return await(client.triggerSavepoint(jobId, savepointDirectory, SavepointFormatType.DEFAULT), 300, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            throw new TimeoutException("Timed out waiting for savepoint completion after 300 seconds");
+        } catch (InterruptedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Savepoint failed: " + e.getMessage(), e);
         }
+    }
 
+    private String cancelWithSavepoint(RunContext runContext, RestClusterClient<StandaloneClusterId> client, JobID jobId)
+        throws Exception {
+        String savepointDirectory = getSavepointDirectory(runContext);
+        try {
+            return await(client.cancelWithSavepoint(jobId, savepointDirectory, SavepointFormatType.DEFAULT), 300, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            throw new TimeoutException("Timed out waiting for savepoint completion after 300 seconds");
+        } catch (InterruptedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Savepoint failed: " + e.getMessage(), e);
+        }
+    }
+
+    private String getSavepointDirectory(RunContext runContext) throws Exception {
+        String savepointDirectory = savepointDir != null
+            ? runContext.render(savepointDir).as(String.class).orElse(null)
+            : null;
         if (savepointDirectory == null) {
             throw new IllegalArgumentException("savepointDir is required when withSavepoint is true");
         }
-
-        Map<String, Object> payloadMap = new HashMap<>();
-        payloadMap.put("targetDirectory", savepointDirectory);
-        payloadMap.put("cancelJob", false);
-        String payload = OBJECT_MAPPER.writeValueAsString(payloadMap);
-
-        HttpRequest request = HttpRequest.builder()
-            .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints"))
-            .method("POST")
-            .addHeader("Content-Type", "application/json")
-            .body(
-                HttpRequest.StringRequestBody.builder()
-                    .content(payload)
-                    .build()
-            )
-            .build();
-
-        HttpResponse<String> response = client.request(request, String.class);
-
-        if (response.getStatus().getCode() != 202) {
-            throw new RuntimeException("Failed to trigger savepoint: " + response.getStatus().getCode() + " - " + response.getBody());
-        }
-
-        // Extract request ID and wait for completion
-        String requestId = extractRequestIdFromResponse(response.getBody());
-        return waitForSavepointCompletion(runContext, client, restUrl, jobId, requestId);
+        return savepointDirectory;
     }
 
-    private String cancelJob(RunContext runContext, HttpClient client, String restUrl, String jobId, boolean drain)
+    private String cancelJob(RestClusterClient<StandaloneClusterId> client, JobID jobId, boolean drain, int timeoutSeconds)
         throws Exception {
-
-        String endpoint = drain ? "/v1/jobs/" + jobId + "/stop" : "/v1/jobs/" + jobId;
-
-        HttpRequest request;
+        CompletableFuture<?> future;
         if (drain) {
-            // For drain, we need to POST with stop request
-            request = HttpRequest.builder()
-                .uri(URI.create(restUrl + endpoint))
-                .method("POST")
-                .addHeader("Content-Type", "application/json")
-                .body(
-                    HttpRequest.StringRequestBody.builder()
-                        .content("{\"drain\":true}")
-                        .build()
-                )
-                .build();
+            future = client.stopWithSavepoint(jobId, true, null, SavepointFormatType.DEFAULT);
         } else {
-            // For regular cancel, we DELETE
-            request = HttpRequest.builder()
-                .uri(URI.create(restUrl + endpoint))
-                .method("DELETE")
-                .build();
+            future = client.cancel(jobId);
         }
 
-        HttpResponse<String> response = client.request(request, String.class);
-
-        if (response.getStatus().getCode() != 202) {
-            throw new RuntimeException("Failed to cancel job: " + response.getStatus().getCode() + " - " + response.getBody());
+        try {
+            if (drain) {
+                await(future, timeoutSeconds, TimeUnit.SECONDS);
+            } else {
+                await(future);
+            }
+        } catch (TimeoutException e) {
+            throw new TimeoutException("Job cancellation timed out after " + timeoutSeconds + " seconds");
+        } catch (InterruptedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to cancel job: " + e.getMessage(), e);
         }
 
         return drain ? "Job stop requested (drain mode)" : "Job cancellation requested";
     }
 
-    private void waitForJobCancellation(RunContext runContext, HttpClient client, String restUrl, String jobId)
-        throws Exception {
-
-        int timeoutSeconds = Math.max(1, runContext.render(cancellationTimeout).as(Integer.class).orElse(60));
+    private void waitForJobCancellation(
+        RunContext runContext,
+        RestClusterClient<StandaloneClusterId> client,
+        JobID jobId,
+        int timeoutSeconds) throws Exception {
         final int intervalSec = 2;
         final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec));
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
         RetryUtils.<Boolean, Exception> of(
             Exponential.builder()
-                .delayFactor(1.0) // Fixed interval
+                .delayFactor(1.0001)
                 .interval(Duration.ofSeconds(intervalSec))
-                .maxInterval(Duration.ofSeconds(intervalSec))
+                .maxInterval(Duration.ofSeconds(intervalSec + 1L))
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
@@ -259,8 +279,8 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 if (result != null && result)
                     return false;
                 if (
-                    throwable instanceof NonRetriableCancellationException ||
-                        throwable instanceof java.util.concurrent.TimeoutException
+                    throwable instanceof TimeoutException ||
+                        throwable instanceof InterruptedException
                 ) {
                     return false;
                 }
@@ -273,86 +293,31 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                     throw new java.util.concurrent.TimeoutException("Job cancellation timed out after " + timeoutSeconds + " seconds");
                 }
 
-                HttpRequest request = HttpRequest.builder()
-                    .uri(URI.create(restUrl + "/v1/jobs/" + jobId))
-                    .method("GET")
-                    .build();
-
-                HttpResponse<String> response = client.request(request, String.class);
-
-                if (response.getStatus().getCode() == 404) {
-                    // Job not found, likely canceled
-                    return true;
-                }
-
-                int statusCode = response.getStatus().getCode();
-                if (statusCode == 200) {
-                    String state = extractJobStateFromResponse(response.getBody());
-                    if ("FINISHED".equals(state) || "FAILED".equals(state) || "CANCELED".equals(state)) {
+                try {
+                    JobStatus status = await(client.getJobStatus(jobId));
+                    if (status == JobStatus.FINISHED || status == JobStatus.FAILED || status == JobStatus.CANCELED) {
                         return true;
                     }
-                } else if (statusCode >= 500 || statusCode == 429) {
-                    runContext.logger().warn("Transient status {} from Flink; will retry. Body: {}", statusCode, response.getBody());
-                    return null; // keep polling
-                } else {
-                    throw new NonRetriableCancellationException("Failed to check job status: " + statusCode + " - " + response.getBody());
-                }
-
-                // Return null to continue polling
-                return null;
-            }
-        );
-    }
-
-    private String waitForSavepointCompletion(RunContext runContext, HttpClient client, String restUrl,
-        String jobId, String requestId) throws Exception {
-
-        int timeoutSeconds = 300; // 5 minutes for savepoint
-        int maxAttempts = timeoutSeconds / 5; // Check every 5 seconds
-
-        return RetryUtils.<String, Exception> of(
-            Exponential.builder()
-                .delayFactor(1.0) // Fixed interval
-                .interval(Duration.ofSeconds(5))
-                .maxInterval(Duration.ofSeconds(5))
-                .maxAttempts(maxAttempts)
-                .build()
-        ).run(
-            (result, throwable) ->
-            {
-                // Don't retry if we got a successful result
-                if (result != null) {
-                    return false;
-                }
-                // Don't retry on fatal exceptions
-                if (throwable instanceof RuntimeException) {
-                    String message = throwable.getMessage();
-                    if (message != null && (message.contains("Savepoint failed:") || message.contains("Failed to check savepoint status:"))) {
-                        return false;
+                } catch (Exception e) {
+                    if (isJobNotFound(e)) {
+                        return true;
                     }
-                }
-                // Retry on other cases
-                return true;
-            },
-            () ->
-            {
-                HttpRequest request = HttpRequest.builder()
-                    .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
-                    .method("GET")
-                    .build();
-
-                HttpResponse<String> response = client.request(request, String.class);
-
-                if (response.getStatus().getCode() != 200) {
-                    throw new RuntimeException("Failed to check savepoint status: " + response.getStatus().getCode() + " - " + response.getBody());
-                }
-
-                String status = extractSavepointStatusFromResponse(response.getBody());
-                if ("COMPLETED".equals(status)) {
-                    return extractSavepointPathFromResponse(response.getBody());
-                } else if ("FAILED".equals(status)) {
-                    String error = extractSavepointErrorFromResponse(response.getBody());
-                    throw new RuntimeException("Savepoint failed: " + error);
+                    RestClientException restException = findRestClientException(e);
+                    if (restException != null) {
+                        int statusCode = restException.getHttpResponseStatus().code();
+                        if (statusCode >= 500 || statusCode == 429) {
+                            runContext.logger().warn(
+                                "Transient status {} from Flink; will retry. Body: {}",
+                                statusCode,
+                                restException.getMessage()
+                            );
+                            return null;
+                        }
+                        throw new NonRetriableCancellationException(
+                            "Failed to check job status: " + statusCode + " - " + restException.getMessage()
+                        );
+                    }
+                    throw e;
                 }
 
                 // Return null to continue polling
@@ -361,62 +326,89 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         );
     }
 
-    private String extractRequestIdFromResponse(String responseBody) {
+    private Configuration createConfiguration(String restUrl) {
+        URI restUri = URI.create(restUrl);
+        String scheme = restUri.getScheme();
+        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
+        }
+        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
+            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
+        }
+
+        Configuration configuration = new Configuration();
+        configuration.set(RestOptions.ADDRESS, restUri.getHost());
+        int port = restUri.getPort() < 0 ? RestOptions.PORT.defaultValue() : restUri.getPort();
+        configuration.set(RestOptions.PORT, port);
+
+        String path = restUri.getPath();
+        if (path != null) {
+            path = path.replaceFirst("/+$", "");
+        }
+        if (path != null && !path.isEmpty()) {
+            configuration.set(RestOptions.PATH, path);
+        }
+        if ("https".equalsIgnoreCase(scheme)) {
+            configuration.set(SecurityOptions.SSL_REST_ENABLED, true);
+        }
+        return configuration;
+    }
+
+    private <T> T await(CompletableFuture<T> future) throws Exception {
         try {
-            JsonNode root = OBJECT_MAPPER.readTree(responseBody);
-            String requestId = root.path("request-id").asText(null);
-            if (requestId == null) {
-                throw new RuntimeException("Could not extract request ID from response: " + responseBody);
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (ExecutionException e) {
+            throwFutureFailure(e);
+            throw e;
+        }
+    }
+
+    private <T> T await(CompletableFuture<T> future, long timeout, TimeUnit unit) throws Exception {
+        try {
+            return future.get(timeout, unit);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (ExecutionException e) {
+            throwFutureFailure(e);
+            throw e;
+        }
+    }
+
+    private void throwFutureFailure(ExecutionException exception) throws Exception {
+        Throwable cause = exception.getCause();
+        if (cause instanceof Exception) {
+            throw (Exception) cause;
+        }
+        if (cause instanceof Error) {
+            throw (Error) cause;
+        }
+        throw new RuntimeException("Flink client operation failed", cause);
+    }
+
+    private boolean isJobNotFound(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause != null) {
+            if (cause instanceof FlinkJobNotFoundException) {
+                return true;
             }
-            return requestId;
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Could not parse savepoint trigger response", e);
+            cause = cause.getCause();
         }
+        return false;
     }
 
-    private String extractJobStateFromResponse(String responseBody) {
-        try {
-            JsonNode root = OBJECT_MAPPER.readTree(responseBody);
-            return root.path("state").asText("UNKNOWN");
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Could not parse job status response", e);
-        }
-    }
-
-    private String extractSavepointStatusFromResponse(String responseBody) {
-        try {
-            JsonNode root = OBJECT_MAPPER.readTree(responseBody);
-            return root.path("status").path("id").asText("UNKNOWN");
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Could not parse savepoint status response", e);
-        }
-    }
-
-    private String extractSavepointPathFromResponse(String responseBody) {
-        try {
-            JsonNode root = OBJECT_MAPPER.readTree(responseBody);
-            JsonNode location = root.path("operation").path("location");
-            return location.isMissingNode() || location.isNull() ? null : location.asText();
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Could not parse savepoint status response", e);
-        }
-    }
-
-    private String extractSavepointErrorFromResponse(String responseBody) {
-        try {
-            JsonNode root = OBJECT_MAPPER.readTree(responseBody);
-            JsonNode failure = root.path("operation").path("failure-cause");
-            if (failure.isMissingNode() || failure.isNull()) {
-                return "Unknown error";
+    private RestClientException findRestClientException(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause != null) {
+            if (cause instanceof RestClientException) {
+                return (RestClientException) cause;
             }
-            JsonNode message = failure.path("message");
-            if (message.isTextual()) {
-                return message.asText();
-            }
-            return failure.toString();
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Could not parse savepoint failure response", e);
+            cause = cause.getCause();
         }
+        return null;
     }
 
     @Builder
@@ -448,9 +440,4 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         }
     }
 
-    private static final class NonRetriableSavepointException extends RuntimeException {
-        NonRetriableSavepointException(String message) {
-            super(message);
-        }
-    }
 }
