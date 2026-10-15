@@ -1,10 +1,13 @@
 package io.kestra.plugin.flink;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -134,90 +137,93 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean failOnErr = runContext.render(this.failOnError).as(Boolean.class).orElse(true);
+        JobID flinkJobId = JobID.fromHexString(rJobId);
+        Configuration configuration = createConfiguration(rRestUrl);
 
         logger.debug("Polling Flink job status: {}", rJobId);
 
-        try {
-            Configuration configuration = createConfiguration(rRestUrl);
-            JobID flinkJobId = JobID.fromHexString(rJobId);
-            JobStatus status;
-            try (
-                RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
-            ) {
-                org.apache.flink.api.common.JobStatus flinkStatus;
+        JobStatus status;
+        try (
+            RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
+        ) {
+            org.apache.flink.api.common.JobStatus flinkStatus;
+            try {
+                flinkStatus = client.getJobStatus(flinkJobId).get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            } catch (ExecutionException e) {
+                Throwable failure = e.getCause() == null ? e : e.getCause();
+                if (isJobNotFound(failure)) {
+                    throw new RuntimeException("Job not found: " + rJobId, failure);
+                }
+                if (isTransientFailure(failure)) {
+                    logger.warn("Transient failure polling Flink job {}: {}", rJobId, failure.getMessage());
+                    return Optional.empty();
+                }
+                if (failure instanceof Exception exception) {
+                    throw exception;
+                }
+                throw e;
+            }
+
+            String state = flinkStatus.name();
+            String stateDetails = null;
+            if (isTerminalState(state)) {
                 try {
-                    flinkStatus = client.getJobStatus(flinkJobId).get();
+                    stateDetails = getStateDetails(runContext, rRestUrl, rJobId);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw e;
+                } catch (Exception e) {
+                    logger.warn("Could not retrieve optional state details for Flink job {}: {}", rJobId, e.getMessage());
                 }
-
-                String state = flinkStatus.name();
-                String stateDetails = isTerminalState(state) ? getStateDetails(runContext, rRestUrl, rJobId) : null;
-                status = JobStatus.builder()
-                    .state(state)
-                    .stateDetails(stateDetails)
-                    .build();
             }
-            logger.debug("Job {} current status: {}", rJobId, status.getState());
-
-            if (isTerminalState(status.getState())) {
-                // Check if this is a successful completion
-                java.util.List<String> expectedStates = getExpectedTerminalStates(runContext);
-                boolean isSuccess = expectedStates.contains(status.getState());
-
-                if (!isSuccess && failOnErr && "FAILED".equals(status.getState())) {
-                    logger.error("Job {} failed: {}", rJobId, status.getStateDetails());
-                } else {
-                    logger.info("Job {} reached terminal state: {} (success: {})", rJobId, status.getState(), isSuccess);
-                }
-
-                // Create execution with job status information and trigger outputs
-                Map<String, Object> triggerOutputs = Map.of(
-                    "jobId", rJobId,
-                    "finalState", status.getState(),
-                    "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
-                    "success", isSuccess
-                );
-
-                return Optional.of(
-                    Execution.builder()
-                        .id(IdUtils.create())
-                        .namespace(conditionContext.getFlow().getNamespace())
-                        .flowId(conditionContext.getFlow().getId())
-                        .flowRevision(conditionContext.getFlow().getRevision())
-                        .state(new State())
-                        .variables(
-                            Map.of(
-                                "jobId", rJobId,
-                                "finalState", status.getState(),
-                                "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
-                                "success", isSuccess
-                            )
-                        )
-                        .outputs(triggerOutputs)
-                        .build()
-                );
-            }
-
-            // Job is not in terminal state, continue polling
-            return Optional.empty();
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw e;
-        } catch (Exception e) {
-            if (isJobNotFound(e)) {
-                throw new RuntimeException("Job not found: " + rJobId, e);
-            }
-            logger.error("Failed to check job status for {}", rJobId, e);
-            // For transient errors (IOException, timeouts), continue polling
-            // For permanent errors (404, invalid URL), fail fast
-            if (e instanceof RuntimeException && e.getMessage() != null && e.getMessage().contains("Job not found")) {
-                throw e; // Fail fast on permanent errors
-            }
-            return Optional.empty(); // Retry on transient errors
+            status = JobStatus.builder()
+                .state(state)
+                .stateDetails(stateDetails)
+                .build();
         }
+        logger.debug("Job {} current status: {}", rJobId, status.getState());
+
+        if (isTerminalState(status.getState())) {
+            java.util.List<String> expectedStates = getExpectedTerminalStates(runContext);
+            boolean isSuccess = expectedStates.contains(status.getState());
+
+            if (!isSuccess && failOnErr && "FAILED".equals(status.getState())) {
+                logger.error("Job {} failed: {}", rJobId, status.getStateDetails());
+            } else {
+                logger.info("Job {} reached terminal state: {} (success: {})", rJobId, status.getState(), isSuccess);
+            }
+
+            Map<String, Object> triggerOutputs = Map.of(
+                "jobId", rJobId,
+                "finalState", status.getState(),
+                "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
+                "success", isSuccess
+            );
+
+            return Optional.of(
+                Execution.builder()
+                    .id(IdUtils.create())
+                    .namespace(conditionContext.getFlow().getNamespace())
+                    .flowId(conditionContext.getFlow().getId())
+                    .flowRevision(conditionContext.getFlow().getRevision())
+                    .state(new State())
+                    .variables(
+                        Map.of(
+                            "jobId", rJobId,
+                            "finalState", status.getState(),
+                            "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
+                            "success", isSuccess
+                        )
+                    )
+                    .outputs(triggerOutputs)
+                    .build()
+            );
+        }
+
+        return Optional.empty();
     }
 
     @Override
@@ -311,8 +317,20 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
             if (cause instanceof RestClientException restException && restException.getHttpResponseStatus().code() == 404) {
                 return true;
             }
-            if (cause.getMessage() != null && cause.getMessage().contains("Job not found")) {
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    private boolean isTransientFailure(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause != null) {
+            if (cause instanceof IOException || cause instanceof TimeoutException) {
                 return true;
+            }
+            if (cause instanceof RestClientException restException) {
+                int statusCode = restException.getHttpResponseStatus().code();
+                return statusCode == 429 || statusCode >= 500;
             }
             cause = cause.getCause();
         }

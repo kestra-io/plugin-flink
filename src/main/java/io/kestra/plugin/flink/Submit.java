@@ -9,22 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.flink.api.common.JobID;
-import org.apache.flink.client.deployment.StandaloneClusterId;
-import org.apache.flink.client.program.PackagedProgram;
-import org.apache.flink.client.program.PackagedProgramUtils;
-import org.apache.flink.client.program.rest.RestClusterClient;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.RestOptions;
-import org.apache.flink.configuration.SecurityOptions;
-import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.runtime.rest.messages.ClusterConfigurationInfoHeaders;
-import org.apache.flink.runtime.rest.messages.ConfigurationInfo;
-import org.apache.flink.runtime.rest.messages.ConfigurationInfoEntry;
-import org.apache.flink.runtime.rest.messages.EmptyMessageParameters;
-import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
 import org.slf4j.Logger;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
@@ -51,7 +36,7 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Submit Flink job from JAR",
-    description = "Uploads a JAR to the Flink REST API to retain its artifact ID, then submits the job with the Flink Java client. Supports program arguments, explicit parallelism, and savepoint restore. The compatibility upload buffers large JARs in memory. HTTPS uses the JVM default trust configuration; custom truststores and mutual TLS are not configurable here."
+    description = "Uploads a JAR to the Flink REST API and submits it through the cluster-side JAR run endpoint, so the job entry point runs on the Flink cluster rather than the Kestra worker. Supports program arguments, explicit parallelism, job configuration, and savepoint restore. The upload buffers large JARs in memory. HTTPS uses the JVM default trust configuration; custom truststores and mutual TLS are not configurable here."
 )
 @Plugin(
     examples = {
@@ -110,7 +95,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
     @Schema(
         title = "Program arguments",
-        description = "Arguments passed to the main method; rendered then space-joined."
+        description = "Arguments passed to the Flink job's main method as a rendered list."
     )
     @PluginProperty(group = "advanced")
     private Property<List<String>> args;
@@ -160,8 +145,8 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         // Upload JAR to Flink cluster
         String jarId = uploadJarToFlink(runContext, rRestUrl, jarLocation);
 
-        // Submit job
-        String jobId = submitJob(runContext, rRestUrl, jarLocation, rEntryClass);
+        // Submit job to the Flink cluster
+        String jobId = submitJob(runContext, rRestUrl, jarId, rEntryClass);
 
         logger.info("Successfully submitted Flink job with ID: {}", jobId);
 
@@ -238,102 +223,87 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         }
     }
 
-    private String submitJob(RunContext runContext, String restUrl, URI jarLocation, String entryClass) throws Exception {
-        Configuration configuration = createConfiguration(restUrl);
-        Configuration jobConfiguration = new Configuration();
-        Configuration programConfiguration = new Configuration(configuration);
-        if (jobConfig != null) {
-            Map<String, String> config = runContext.render(jobConfig).asMap(String.class, String.class);
-            if (config != null && !config.isEmpty()) {
-                config.forEach((key, value) ->
-                {
-                    jobConfiguration.setString(key, value);
-                    programConfiguration.setString(key, value);
-                });
-            }
-        }
-
-        int defaultParallelism;
-        if (parallelism != null) {
-            Integer parallelismValue = runContext.render(parallelism).as(Integer.class).orElse(null);
-            if (parallelismValue != null) {
-                defaultParallelism = parallelismValue;
-            } else if (jobConfiguration.contains(CoreOptions.DEFAULT_PARALLELISM)) {
-                defaultParallelism = jobConfiguration.get(CoreOptions.DEFAULT_PARALLELISM);
-            } else {
-                defaultParallelism = getClusterDefaultParallelism(restUrl);
-            }
-        } else if (jobConfiguration.contains(CoreOptions.DEFAULT_PARALLELISM)) {
-            defaultParallelism = jobConfiguration.get(CoreOptions.DEFAULT_PARALLELISM);
-        } else {
-            defaultParallelism = getClusterDefaultParallelism(restUrl);
-        }
-
-        PackagedProgram.Builder programBuilder = PackagedProgram.newBuilder()
-            .setJarFile(java.nio.file.Paths.get(jarLocation).toFile())
-            .setEntryPointClassName(entryClass)
-            .setConfiguration(programConfiguration);
-
-        if (args != null) {
-            List<String> renderedArgs = runContext.render(args).asList(String.class);
-            if (renderedArgs != null && !renderedArgs.isEmpty()) {
-                programBuilder.setArguments(renderedArgs.toArray(new String[0]));
-            }
-        }
-
-        if (restoreFromSavepoint != null) {
-            String savepointPath = runContext.render(restoreFromSavepoint).as(String.class).orElse(null);
-            if (savepointPath != null) {
-                Boolean allowNonRestored = runContext.render(allowNonRestoredState).as(Boolean.class).orElse(false);
-                programBuilder.setSavepointRestoreSettings(SavepointRestoreSettings.forPath(savepointPath, allowNonRestored));
-            }
-        }
-
+    private String submitJob(RunContext runContext, String restUrl, String jarId, String entryClass) throws Exception {
         try (
-            PackagedProgram program = programBuilder.build();
-            RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
+            HttpClient client = HttpClient.builder()
+                .runContext(runContext)
+                .build()
         ) {
-            JobGraph jobGraph = PackagedProgramUtils.createJobGraph(program, programConfiguration, defaultParallelism, true);
-            jobGraph.setJobConfiguration(jobConfiguration);
+            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            payload.put("entryClass", entryClass);
 
-            // submitJob is asynchronous; wait for Flink's assigned job ID before returning the task output.
-            JobID jobId;
-            try {
-                jobId = client.submitJob(jobGraph).get();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw e;
+            if (parallelism != null) {
+                Integer parallelismValue = runContext.render(parallelism)
+                    .as(Integer.class)
+                    .orElse(null);
+
+                if (parallelismValue != null) {
+                    payload.put("parallelism", parallelismValue);
+                }
             }
-            return jobId.toString();
-        }
-    }
 
-    private Configuration createConfiguration(String restUrl) {
-        URI restUri = URI.create(restUrl);
-        String scheme = restUri.getScheme();
-        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
-        }
+            if (args != null) {
+                List<String> renderedArgs = runContext.render(args)
+                    .asList(String.class);
 
-        Configuration configuration = new Configuration();
-        configuration.set(RestOptions.ADDRESS, restUri.getHost());
-        int port = restUri.getPort();
-        if (port < 0) {
-            port = RestOptions.PORT.defaultValue();
-        }
-        configuration.set(RestOptions.PORT, port);
+                if (renderedArgs != null && !renderedArgs.isEmpty()) {
+                    payload.put("programArgsList", renderedArgs);
+                }
+            }
 
-        String path = restUri.getPath();
-        if (path != null) {
-            path = path.replaceFirst("/+$", "");
+            if (restoreFromSavepoint != null) {
+                String savepointPath = runContext.render(restoreFromSavepoint)
+                    .as(String.class)
+                    .orElse(null);
+
+                if (savepointPath != null) {
+                    payload.put("savepointPath", savepointPath);
+
+                    Boolean allowNonRestored = runContext.render(allowNonRestoredState)
+                        .as(Boolean.class)
+                        .orElse(false);
+
+                    payload.put("allowNonRestoredState", allowNonRestored);
+                }
+            }
+
+            if (jobConfig != null) {
+                Map<String, String> config = runContext.render(jobConfig)
+                    .asMap(String.class, String.class);
+
+                if (config != null && !config.isEmpty()) {
+                    payload.put("flinkConfiguration", config);
+                }
+            }
+
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+            String requestBody = mapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.builder()
+                .uri(URI.create(restEndpoint(restUrl, "/v1/jars/" + jarId + "/run")))
+                .method("POST")
+                .addHeader("Content-Type", "application/json")
+                .body(
+                    HttpRequest.StringRequestBody.builder()
+                        .content(requestBody)
+                        .build()
+                )
+                .build();
+
+            HttpResponse<String> response = client.request(request, String.class);
+
+            if (response.getStatus().getCode() != 200) {
+                throw new RuntimeException(
+                    "Failed to submit job: "
+                        + response.getStatus().getCode()
+                        + " - "
+                        + response.getBody()
+                );
+            }
+
+            return extractJobIdFromResponse(response.getBody());
         }
-        if (path != null && !path.isEmpty() && !"/".equals(path)) {
-            configuration.set(RestOptions.PATH, path);
-        }
-        if ("https".equalsIgnoreCase(scheme)) {
-            configuration.set(SecurityOptions.SSL_REST_ENABLED, true);
-        }
-        return configuration;
     }
 
     private String normalizeRestUrl(String restUrl) {
@@ -367,29 +337,6 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
         return restUrl.replaceFirst("/+$", "") + endpoint;
     }
 
-    private int getClusterDefaultParallelism(String restUrl) throws Exception {
-        Configuration clusterConfiguration = new Configuration();
-        try (
-            RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(
-                createConfiguration(restUrl),
-                StandaloneClusterId.getInstance()
-            )
-        ) {
-            ConfigurationInfo configuration = client.sendRequest(
-                ClusterConfigurationInfoHeaders.getInstance(),
-                EmptyMessageParameters.getInstance(),
-                EmptyRequestBody.getInstance()
-            ).get();
-            for (ConfigurationInfoEntry entry : configuration) {
-                if (CoreOptions.DEFAULT_PARALLELISM.key().equals(entry.getKey())) {
-                    clusterConfiguration.setString(CoreOptions.DEFAULT_PARALLELISM.key(), entry.getValue());
-                    break;
-                }
-            }
-        }
-        return clusterConfiguration.get(CoreOptions.DEFAULT_PARALLELISM);
-    }
-
     private String extractJarIdFromResponse(String responseBody) {
         Matcher matcher = Pattern.compile("\"filename\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
         if (matcher.find()) {
@@ -398,6 +345,16 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
             return separator >= 0 ? filename.substring(separator + 1) : filename;
         }
         throw new RuntimeException("Could not extract JAR ID from response: " + responseBody);
+    }
+
+    private String extractJobIdFromResponse(String responseBody) {
+        Matcher matcher = Pattern.compile("\"jobid\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
+
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+
+        throw new RuntimeException("Could not extract job ID from response: " + responseBody);
     }
 
     @Builder
