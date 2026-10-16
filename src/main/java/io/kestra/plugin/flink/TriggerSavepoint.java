@@ -2,19 +2,33 @@ package io.kestra.plugin.flink;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
+import org.apache.flink.api.common.JobID;
+import org.apache.flink.client.deployment.StandaloneClusterId;
+import org.apache.flink.client.program.rest.RestClusterClient;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestOptions;
+import org.apache.flink.configuration.SecurityOptions;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.rest.handler.async.TriggerResponse;
+import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerHeaders;
+import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerMessageParameters;
+import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerRequestBody;
 import org.slf4j.Logger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
@@ -26,7 +40,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -46,6 +59,11 @@ import io.kestra.core.models.annotations.PluginProperty;
                 id: create-savepoint
                 namespace: company.team
 
+                inputs:
+                  - id: jobId
+                    type: STRING
+                    required: true
+
                 tasks:
                   - id: trigger-savepoint
                     type: io.kestra.plugin.flink.TriggerSavepoint
@@ -53,6 +71,9 @@ import io.kestra.core.models.annotations.PluginProperty;
                     jobId: "{{ inputs.jobId }}"
                     targetDirectory: "s3://flink/savepoints/backup/{{ execution.id }}"
                     savepointTimeout: 300
+
+                # jobId must identify an existing Flink job and the Flink JobManager must be reachable.
+                # The cluster must support the target filesystem and have access permissions for this path.
                 """
         ),
         @Example(
@@ -62,11 +83,18 @@ import io.kestra.core.models.annotations.PluginProperty;
                 id: default-savepoint
                 namespace: company.team
 
+                inputs:
+                  - id: jobId
+                    type: STRING
+                    required: true
+
                 tasks:
                   - id: trigger-savepoint
                     type: io.kestra.plugin.flink.TriggerSavepoint
                     restUrl: "http://flink-jobmanager:8081"
                     jobId: "{{ inputs.jobId }}"
+
+                # jobId must identify an existing Flink job and the Flink JobManager must be reachable.
                 """
         )
     }
@@ -126,21 +154,28 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     public TriggerSavepoint.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
+        String rRestUrl = normalizeRestUrl(runContext.render(this.restUrl).as(String.class).orElseThrow());
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean cancel = runContext.render(this.cancelJob).as(Boolean.class).orElse(false);
 
         logger.info("Triggering savepoint for job: {} (cancel: {})", rJobId, cancel);
 
-        HttpClient client = HttpClient.builder()
-            .runContext(runContext)
-            .build();
+        String requestId;
+        String savepointPath;
+        try (
+            RestClusterClient<StandaloneClusterId> flinkClient = new RestClusterClient<>(
+                createConfiguration(URI.create(rRestUrl)),
+                StandaloneClusterId.getInstance()
+            );
+            HttpClient client = HttpClient.builder()
+                .runContext(runContext)
+                .build()
+        ) {
+            requestId = triggerSavepoint(runContext, flinkClient, rJobId, cancel);
 
-        // Trigger the savepoint
-        String requestId = triggerSavepoint(runContext, client, rRestUrl, rJobId, cancel);
-
-        // Wait for completion
-        String savepointPath = waitForSavepointCompletion(runContext, client, rRestUrl, rJobId, requestId);
+            // Wait for completion
+            savepointPath = waitForSavepointCompletion(runContext, client, rRestUrl, rJobId, requestId);
+        }
 
         logger.info("Savepoint created successfully at: {}", savepointPath);
 
@@ -151,44 +186,77 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             .build();
     }
 
-    private String triggerSavepoint(RunContext runContext, HttpClient client, String restUrl, String jobId, boolean cancelJob)
+    private String triggerSavepoint(RunContext runContext, RestClusterClient<StandaloneClusterId> client, String jobId, boolean cancelJob)
         throws Exception {
-
-        ObjectNode payload = JSON.createObjectNode();
-
-        if (targetDirectory != null) {
-            String directory = runContext.render(targetDirectory).as(String.class).orElse(null);
-            if (directory != null) {
-                payload.put("target-directory", directory);
-            }
-        }
-
+        String directory = targetDirectory == null
+            ? null
+            : runContext.render(targetDirectory).as(String.class).orElse(null);
         String format = runContext.render(formatType).as(String.class).orElse("CANONICAL");
-        payload.put("format-type", format);
-
-        payload.put("cancel-job", cancelJob);
-
-        String body = JSON.writeValueAsString(payload);
-
-        HttpRequest request = HttpRequest.builder()
-            .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints"))
-            .method("POST")
-            .addHeader("Content-Type", "application/json")
-            .body(
-                HttpRequest.StringRequestBody.builder()
-                    .content(body)
-                    .build()
-            )
-            .build();
-
-        HttpResponse<String> response = client.request(request, String.class);
-
-        if (response.getStatus().getCode() != 202) {
-            throw new RuntimeException("Failed to trigger savepoint: " + response.getStatus().getCode() + " - " + response.getBody());
+        SavepointFormatType formatType = SavepointFormatType.valueOf(format.toUpperCase(Locale.ROOT));
+        JobID flinkJobId = JobID.fromHexString(jobId);
+        if (!cancelJob) {
+            return await(client.triggerDetachedSavepoint(flinkJobId, directory, formatType));
         }
 
-        // Extract and return request ID
-        return extractRequestIdFromResponse(response.getBody());
+        SavepointTriggerHeaders headers = SavepointTriggerHeaders.getInstance();
+        SavepointTriggerMessageParameters parameters = headers.getUnresolvedMessageParameters();
+        parameters.jobID.resolve(flinkJobId);
+        try {
+            CompletableFuture<TriggerResponse> response = client.sendRequest(
+                headers,
+                parameters,
+                new SavepointTriggerRequestBody(directory, cancelJob, formatType, null)
+            );
+            return response.get().getTriggerId().toString();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new RuntimeException("Flink savepoint trigger failed", cause);
+        }
+    }
+
+    private Configuration createConfiguration(URI restUri) {
+        Configuration configuration = new Configuration();
+        configuration.set(RestOptions.ADDRESS, restUri.getHost());
+        configuration.set(RestOptions.PORT, restUri.getPort() < 0 ? RestOptions.PORT.defaultValue() : restUri.getPort());
+
+        String path = restUri.getPath();
+        if (path != null) {
+            path = path.replaceFirst("/+$", "");
+        }
+        if (path != null && !path.isEmpty()) {
+            configuration.set(RestOptions.PATH, path);
+        }
+        if ("https".equalsIgnoreCase(restUri.getScheme())) {
+            configuration.set(SecurityOptions.SSL_REST_ENABLED, true);
+        }
+        return configuration;
+    }
+
+    private <T> T await(CompletableFuture<T> future) throws Exception {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new RuntimeException("Flink savepoint trigger failed", cause);
+        }
     }
 
     private String waitForSavepointCompletion(RunContext runContext, HttpClient client, String restUrl,
@@ -201,9 +269,9 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
 
         return RetryUtils.<String, Exception> of(
             Exponential.builder()
-                .delayFactor(1.0) // Fixed interval
+                .delayFactor(1.0001)
                 .interval(Duration.ofSeconds(intervalSec))
-                .maxInterval(Duration.ofSeconds(intervalSec))
+                .maxInterval(Duration.ofSeconds(intervalSec + 1L))
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
@@ -227,7 +295,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
                 }
 
                 HttpRequest request = HttpRequest.builder()
-                    .uri(URI.create(restUrl + "/v1/jobs/" + jobId + "/savepoints/" + requestId))
+                    .uri(URI.create(restEndpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints/" + requestId)))
                     .method("GET")
                     .build();
 
@@ -258,17 +326,35 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         );
     }
 
-    private String extractRequestIdFromResponse(String responseBody) {
-        try {
-            JsonNode root = JSON.readTree(responseBody);
-            JsonNode requestId = root.path("request-id");
-            if (requestId.isTextual()) {
-                return requestId.asText();
-            }
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to parse savepoint trigger response: " + responseBody, e);
+    private String normalizeRestUrl(String restUrl) {
+        URI restUri = URI.create(restUrl);
+        String scheme = restUri.getScheme();
+        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
         }
-        throw new RuntimeException("Could not extract request ID from response: " + responseBody);
+        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
+            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
+        }
+        if (restUri.getPort() >= 0) {
+            return restUrl;
+        }
+
+        StringBuilder normalizedUrl = new StringBuilder()
+            .append(scheme)
+            .append("://")
+            .append(restUri.getRawAuthority())
+            .append(':')
+            .append(RestOptions.PORT.defaultValue());
+        String path = restUri.getRawPath();
+        if (path != null) {
+            path = path.replaceFirst("/+$", "");
+            normalizedUrl.append(path);
+        }
+        return normalizedUrl.toString();
+    }
+
+    private String restEndpoint(String restUrl, String endpoint) {
+        return restUrl.replaceFirst("/+$", "") + endpoint;
     }
 
     private String extractSavepointStatusFromResponse(String responseBody) {
