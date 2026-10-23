@@ -1,12 +1,10 @@
 package io.kestra.plugin.flink;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
 import java.util.jar.JarEntry;
@@ -19,7 +17,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedConstruction;
 import org.mockito.Mockito;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -78,8 +75,8 @@ class RestClusterClientTest {
                 )
                 .willReturn(okJson("{\"jobid\":\"" + JOB_ID + "\"}"))
         );
-        Path jar = createJobJar(WorkerExecutionGuardJob.class);
-        Submit task = Submit.builder()
+        var jar = createJobJar(WorkerExecutionGuardJob.class);
+        var task = Submit.builder()
             .id("rest-client-submit")
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -89,7 +86,7 @@ class RestClusterClientTest {
             .build();
 
         try {
-            Submit.Output output = task.run(runContext(task));
+            var output = task.run(runContext(task));
 
             assertThat(output.getJobId(), is(JOB_ID));
             assertThat(output.getJarId(), is(JAR_ID));
@@ -121,8 +118,8 @@ class RestClusterClientTest {
                 .withRequestBody(equalToJson("{\"entryClass\":\"" + NoOpJob.class.getName() + "\"}"))
                 .willReturn(okJson("{\"jobid\":\"" + JOB_ID + "\"}"))
         );
-        Path jar = createJobJar();
-        Submit task = Submit.builder()
+        var jar = createJobJar();
+        var task = Submit.builder()
             .id("rest-client-submit-cluster-default")
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -131,7 +128,7 @@ class RestClusterClientTest {
             .build();
 
         try {
-            Submit.Output output = task.run(runContext(task));
+            var output = task.run(runContext(task));
 
             assertThat(output.getJobId(), is(JOB_ID));
             assertThat(output.getJarId(), is(JAR_ID));
@@ -150,7 +147,7 @@ class RestClusterClientTest {
             post(urlEqualTo("/v1/jars/upload"))
                 .willReturn(okJson("{\"filename\":\"/uploads/" + JAR_ID + "\",\"status\":\"success\"}"))
         );
-        String requestBody = "{\"entryClass\":\"" + NoOpJob.class.getName()
+        var requestBody = "{\"entryClass\":\"" + NoOpJob.class.getName()
             + "\",\"parallelism\":3,\"programArgsList\":[\"--input\",\"s3://input data/\"],"
             + "\"savepointPath\":\"s3://savepoints/restore\",\"allowNonRestoredState\":true,"
             + "\"flinkConfiguration\":{\"execution.checkpointing.interval\":\"10s\"}}";
@@ -159,8 +156,8 @@ class RestClusterClientTest {
                 .withRequestBody(equalToJson(requestBody))
                 .willReturn(okJson("{\"jobid\":\"" + JOB_ID + "\"}"))
         );
-        Path jar = createJobJar();
-        Submit task = Submit.builder()
+        var jar = createJobJar();
+        var task = Submit.builder()
             .id("rest-client-submit-options")
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -174,7 +171,7 @@ class RestClusterClientTest {
             .build();
 
         try {
-            Submit.Output output = task.run(runContext(task));
+            var output = task.run(runContext(task));
 
             assertThat(output.getJobId(), is(JOB_ID));
             assertThat(output.getJarId(), is(JAR_ID));
@@ -206,14 +203,14 @@ class RestClusterClientTest {
                 .whenScenarioStateIs("job-cancelled")
                 .willReturn(okJson("{\"state\":\"CANCELED\"}"))
         );
-        CancelJob task = CancelJob.builder()
+        var task = CancelJob.builder()
             .id("rest-client-cancel")
             .type(CancelJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jobId(Property.ofValue(JOB_ID))
             .build();
 
-        CancelJob.Output output = task.run(runContext(task));
+        var output = task.run(runContext(task));
 
         assertThat(output.getJobId(), is(JOB_ID));
         assertThat(output.getCancellationResult(), is("Job cancellation requested"));
@@ -245,7 +242,7 @@ class RestClusterClientTest {
                     )
                 )
         );
-        CancelJob task = CancelJob.builder()
+        var task = CancelJob.builder()
             .id("rest-client-cancel-savepoint")
             .type(CancelJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -254,7 +251,7 @@ class RestClusterClientTest {
             .savepointDir(Property.ofValue("s3://savepoints/cancel"))
             .build();
 
-        CancelJob.Output output = task.run(runContext(task));
+        var output = task.run(runContext(task));
 
         assertThat(output.getJobId(), is(JOB_ID));
         assertThat(output.getSavepointPath(), is("s3://savepoints/cancel/complete"));
@@ -279,7 +276,7 @@ class RestClusterClientTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID + "/savepoints/" + REQUEST_ID))
                 .willReturn(okJson("{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"location\":\"s3://default/drain\"}}"))
         );
-        CancelJob task = CancelJob.builder()
+        var task = CancelJob.builder()
             .id("rest-client-drain")
             .type(CancelJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -287,7 +284,7 @@ class RestClusterClientTest {
             .drainJob(Property.ofValue(true))
             .build();
 
-        CancelJob.Output output = task.run(runContext(task));
+        var output = task.run(runContext(task));
 
         assertThat(output.getJobId(), is(JOB_ID));
         assertThat(output.getSavepointPath(), nullValue());
@@ -321,7 +318,7 @@ class RestClusterClientTest {
                     )
                 )
         );
-        CancelJob task = CancelJob.builder()
+        var task = CancelJob.builder()
             .id("rest-client-drain-savepoint")
             .type(CancelJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -331,7 +328,7 @@ class RestClusterClientTest {
             .drainJob(Property.ofValue(true))
             .build();
 
-        CancelJob.Output output = task.run(runContext(task));
+        var output = task.run(runContext(task));
 
         assertThat(output.getSavepointPath(), is("s3://savepoints/drained/complete"));
         server.verify(1, postRequestedFor(urlEqualTo("/v1/jobs/" + JOB_ID + "/stop")));
@@ -340,7 +337,7 @@ class RestClusterClientTest {
 
     @Test
     void requiresSavepointDirectoryWhenSavepointIsEnabled() throws Exception {
-        CancelJob task = CancelJob.builder()
+        var task = CancelJob.builder()
             .id("cancel-without-savepoint-directory")
             .type(CancelJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -362,7 +359,7 @@ class RestClusterClientTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID))
                 .willReturn(okJson("{\"state\":\"RUNNING\"}"))
         );
-        CancelJob task = CancelJob.builder()
+        var task = CancelJob.builder()
             .id("cancel-timeout")
             .type(CancelJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -379,34 +376,34 @@ class RestClusterClientTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID))
                 .willReturn(okJson("{\"state\":\"FINISHED\",\"state-details\":\"completed with warnings\"}"))
         );
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("rest-client-monitor")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jobId(Property.ofValue(JOB_ID))
             .build();
-        Submit runContextTask = Submit.builder()
+        var runContextTask = Submit.builder()
             .id("rest-client-monitor-context")
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jarUri(Property.ofValue("file:///tmp/monitor-context.jar"))
             .entryClass(Property.ofValue("com.example.Main"))
             .build();
-        RunContext runContext = runContext(runContextTask);
-        FlowInterface flow = Mockito.mock(FlowInterface.class);
+        var runContext = runContext(runContextTask);
+        var flow = Mockito.mock(FlowInterface.class);
         when(flow.getNamespace()).thenReturn("company.team");
         when(flow.getId()).thenReturn("monitored-flow");
         when(flow.getRevision()).thenReturn(1);
-        ConditionContext conditionContext = new ConditionContext(flow, null, runContext, Map.of(), null);
+        var conditionContext = new ConditionContext(flow, null, runContext, Map.of(), null);
 
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> when(client.getJobStatus(Mockito.any(JobID.class)))
                     .thenReturn(CompletableFuture.completedFuture(JobStatus.FINISHED))
             )
         ) {
-            Optional<io.kestra.core.models.executions.Execution> execution = task.evaluate(conditionContext, new TriggerContext());
+            var execution = task.evaluate(conditionContext, new TriggerContext());
 
             assertThat(execution.isPresent(), is(true));
             assertThat(execution.orElseThrow().getOutputs().get("jobId"), is(JOB_ID));
@@ -419,7 +416,7 @@ class RestClusterClientTest {
 
     @Test
     void rejectsInvalidJobIdBeforeCreatingRestClient() throws Exception {
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("monitor-invalid-job-id")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -436,7 +433,7 @@ class RestClusterClientTest {
 
     @Test
     void treatsTransientMonitorFailureAsAnEmptyPoll() throws Exception {
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("monitor-transient-failure")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -444,13 +441,13 @@ class RestClusterClientTest {
             .build();
 
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> when(client.getJobStatus(Mockito.any(JobID.class)))
                     .thenReturn(CompletableFuture.failedFuture(new IOException("temporary connection failure")))
             )
         ) {
-            Optional<io.kestra.core.models.executions.Execution> execution = task.evaluate(
+            var execution = task.evaluate(
                 monitorConditionContext(task),
                 new TriggerContext()
             );
@@ -461,7 +458,7 @@ class RestClusterClientTest {
 
     @Test
     void propagatesPermanentMonitorFailure() throws Exception {
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("monitor-permanent-failure")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -469,7 +466,7 @@ class RestClusterClientTest {
             .build();
 
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> when(client.getJobStatus(Mockito.any(JobID.class)))
                     .thenReturn(CompletableFuture.failedFuture(new IllegalArgumentException("invalid request")))
@@ -488,7 +485,7 @@ class RestClusterClientTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID))
                 .willReturn(aResponse().withStatus(500).withBody("temporary failure"))
         );
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("monitor-state-details-failure")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -496,13 +493,13 @@ class RestClusterClientTest {
             .build();
 
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> when(client.getJobStatus(Mockito.any(JobID.class)))
                     .thenReturn(CompletableFuture.completedFuture(JobStatus.FINISHED))
             )
         ) {
-            Optional<io.kestra.core.models.executions.Execution> execution = task.evaluate(
+            var execution = task.evaluate(
                 monitorConditionContext(task),
                 new TriggerContext()
             );
@@ -528,34 +525,34 @@ class RestClusterClientTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID))
                 .willReturn(okJson("{\"state\":\"" + expectedState + "\",\"state-details\":\"" + details + "\"}"))
         );
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("rest-client-monitor-" + expectedState.toLowerCase())
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jobId(Property.ofValue(JOB_ID))
             .expectedTerminalStates(Property.ofValue(java.util.List.of(expectedState)))
             .build();
-        Submit runContextTask = Submit.builder()
+        var runContextTask = Submit.builder()
             .id("rest-client-monitor-context-" + expectedState.toLowerCase())
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jarUri(Property.ofValue("file:///tmp/monitor-context.jar"))
             .entryClass(Property.ofValue("com.example.Main"))
             .build();
-        FlowInterface flow = Mockito.mock(FlowInterface.class);
+        var flow = Mockito.mock(FlowInterface.class);
         when(flow.getNamespace()).thenReturn("company.team");
         when(flow.getId()).thenReturn("monitored-flow");
         when(flow.getRevision()).thenReturn(1);
-        ConditionContext conditionContext = new ConditionContext(flow, null, runContext(runContextTask), Map.of(), null);
+        var conditionContext = new ConditionContext(flow, null, runContext(runContextTask), Map.of(), null);
 
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> when(client.getJobStatus(Mockito.any(JobID.class)))
                     .thenReturn(CompletableFuture.completedFuture(jobStatus))
             )
         ) {
-            Optional<io.kestra.core.models.executions.Execution> execution = task.evaluate(conditionContext, new TriggerContext());
+            var execution = task.evaluate(conditionContext, new TriggerContext());
 
             assertThat(execution.isPresent(), is(true));
             assertThat(execution.orElseThrow().getOutputs().get("jobId"), is(JOB_ID));
@@ -572,14 +569,14 @@ class RestClusterClientTest {
     }
 
     private ConditionContext monitorConditionContext(MonitorJob task) {
-        Submit runContextTask = Submit.builder()
+        var runContextTask = Submit.builder()
             .id("monitor-context-" + task.getId())
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jarUri(Property.ofValue("file:///tmp/monitor-context.jar"))
             .entryClass(Property.ofValue("com.example.Main"))
             .build();
-        FlowInterface flow = Mockito.mock(FlowInterface.class);
+        var flow = Mockito.mock(FlowInterface.class);
         when(flow.getNamespace()).thenReturn("company.team");
         when(flow.getId()).thenReturn("monitored-flow");
         when(flow.getRevision()).thenReturn(1);
@@ -591,11 +588,11 @@ class RestClusterClientTest {
     }
 
     private Path createJobJar(Class<?> jobClass) throws IOException {
-        Path jar = Files.createTempFile("flink-no-op-job", ".jar");
-        String resourceName = "/" + jobClass.getName().replace('.', '/') + ".class";
+        var jar = Files.createTempFile("flink-no-op-job", ".jar");
+        var resourceName = "/" + jobClass.getName().replace('.', '/') + ".class";
         try (
-            InputStream bytecode = jobClass.getResourceAsStream(resourceName);
-            JarOutputStream output = new JarOutputStream(Files.newOutputStream(jar))
+            var bytecode = jobClass.getResourceAsStream(resourceName);
+            var output = new JarOutputStream(Files.newOutputStream(jar))
         ) {
             if (bytecode == null) {
                 throw new IOException("Could not read test job bytecode: " + resourceName);
@@ -609,7 +606,7 @@ class RestClusterClientTest {
 
     public static class NoOpJob {
         public static void main(String[] args) throws Exception {
-            StreamExecutionEnvironment environment = StreamExecutionEnvironment.getExecutionEnvironment();
+            var environment = StreamExecutionEnvironment.getExecutionEnvironment();
             environment.fromData(1).print();
             environment.execute("test-no-op-job");
         }

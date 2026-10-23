@@ -60,7 +60,7 @@ class MonitorJobTest {
 
     @Test
     void testMonitorJobUsesConfiguredInterval() {
-        MonitorJob monitor = MonitorJob.builder()
+        var monitor = MonitorJob.builder()
             .id("test-monitor-custom-interval")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue("http://localhost:8081"))
@@ -73,7 +73,7 @@ class MonitorJobTest {
 
     @Test
     void testMonitorJobKeepsDefaultForTemplatedInterval() {
-        MonitorJob monitor = MonitorJob.builder()
+        var monitor = MonitorJob.builder()
             .id("test-monitor-templated-interval")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue("http://localhost:8081"))
@@ -86,7 +86,7 @@ class MonitorJobTest {
 
     @Test
     void testMonitorJobKeepsDefaultForNullInterval() {
-        MonitorJob monitor = MonitorJob.builder()
+        var monitor = MonitorJob.builder()
             .id("test-monitor-null-interval")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue("http://localhost:8081"))

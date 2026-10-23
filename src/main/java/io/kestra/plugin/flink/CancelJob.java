@@ -151,15 +151,15 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     public CancelJob.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
+        var rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean withSp = runContext.render(this.withSavepoint).as(Boolean.class).orElse(false);
         Boolean drain = runContext.render(this.drainJob).as(Boolean.class).orElse(false);
-        int timeoutSeconds = Math.max(1, runContext.render(cancellationTimeout).as(Integer.class).orElse(60));
+        var timeoutSeconds = Math.max(1, runContext.render(cancellationTimeout).as(Integer.class).orElse(60));
 
         JobID.fromHexString(rJobId);
-        String savepointDirectory = withSp ? getSavepointDirectory(runContext) : null;
-        Instant deadline = Instant.now().plusSeconds(timeoutSeconds);
+        var savepointDirectory = withSp ? getSavepointDirectory(runContext) : null;
+        var deadline = Instant.now().plusSeconds(timeoutSeconds);
 
         logger.info("Cancelling Flink job: {} (withSavepoint: {}, drain: {})", rJobId, withSp, drain);
 
@@ -167,7 +167,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
             String savepointPath = null;
 
             if (drain) {
-                String stoppedWithSavepoint = stopWithSavepoint(
+                var stoppedWithSavepoint = stopWithSavepoint(
                     runContext,
                     client,
                     rRestUrl,
@@ -222,7 +222,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         payload.put("target-directory", savepointDirectory);
         payload.put("cancel-job", true);
         payload.put("formatType", "CANONICAL");
-        String requestId = triggerOperation(
+        var requestId = triggerOperation(
             client,
             FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints"),
             payload,
@@ -244,7 +244,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         }
         payload.put("drain", true);
         payload.put("formatType", "CANONICAL");
-        String requestId = triggerOperation(
+        var requestId = triggerOperation(
             client,
             FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/stop"),
             payload,
@@ -277,8 +277,8 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         String jobId,
         String requestId,
         Instant deadline) throws Exception {
-        int timeoutSeconds = remainingSeconds(deadline);
-        int maxAttempts = maxAttemptsForTimeout(timeoutSeconds);
+        var timeoutSeconds = remainingSeconds(deadline);
+        var maxAttempts = maxAttemptsForTimeout(timeoutSeconds);
         String savepointPath;
         try {
             savepointPath = RetryUtils.<String, Exception> of(
@@ -298,7 +298,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                         FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints/" + requestId),
                         "savepoint"
                     );
-                    int statusCode = response.getStatus().getCode();
+                    var statusCode = response.getStatus().getCode();
                     if (statusCode == 429 || statusCode >= 500) {
                         runContext.logger().warn("Transient status {} from Flink; retrying savepoint status poll", statusCode);
                         return null;
@@ -354,7 +354,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         String jobId,
         Instant deadline,
         int timeoutSeconds) throws Exception {
-        int maxAttempts = maxAttemptsForTimeout(timeoutSeconds);
+        var maxAttempts = maxAttemptsForTimeout(timeoutSeconds);
         Boolean completed;
         try {
             completed = RetryUtils.<Boolean, Exception> of(
@@ -374,7 +374,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                         FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId),
                         "job"
                     );
-                    int statusCode = response.getStatus().getCode();
+                    var statusCode = response.getStatus().getCode();
                     if (statusCode == 404) {
                         return true;
                     }
@@ -410,7 +410,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         try {
             return client.request(request, String.class);
         } catch (HttpClientResponseException e) {
-            int statusCode = e.getResponse() == null ? -1 : e.getResponse().getStatus().getCode();
+            var statusCode = e.getResponse() == null ? -1 : e.getResponse().getStatus().getCode();
             if (statusCode == 404 && "job".equals(operation)) {
                 return HttpResponse.<String> of(HttpResponse.Status.NOT_FOUND, null);
             }
@@ -422,7 +422,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private String getSavepointDirectory(RunContext runContext) throws Exception {
-        String savepointDirectory = savepointDir != null
+        var savepointDirectory = savepointDir != null
             ? runContext.render(savepointDir).as(String.class).orElse(null)
             : null;
         if (savepointDirectory == null || savepointDirectory.isBlank()) {
@@ -432,7 +432,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private int remainingSeconds(Instant deadline) throws TimeoutException {
-        long remaining = Duration.between(Instant.now(), deadline).getSeconds();
+        var remaining = Duration.between(Instant.now(), deadline).getSeconds();
         if (remaining <= 0) {
             throw new CancellationTimeoutException(JOB_CANCELLATION_TIMEOUT_MESSAGE);
         }
@@ -460,7 +460,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 return true;
             }
             if (cause instanceof HttpClientResponseException responseException && responseException.getResponse() != null) {
-                int statusCode = responseException.getResponse().getStatus().getCode();
+                var statusCode = responseException.getResponse().getStatus().getCode();
                 return statusCode == 429 || statusCode >= 500;
             }
         }
@@ -468,7 +468,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private String extractRequestId(String responseBody) throws JsonProcessingException {
-        String requestId = JSON.readTree(responseBody).path("request-id").asText(null);
+        var requestId = JSON.readTree(responseBody).path("request-id").asText(null);
         if (requestId == null) {
             throw new IllegalStateException("Could not extract request ID from Flink response: " + responseBody);
         }

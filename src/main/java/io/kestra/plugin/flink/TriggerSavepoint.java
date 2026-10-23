@@ -10,9 +10,7 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.client.deployment.StandaloneClusterId;
 import org.apache.flink.client.program.rest.RestClusterClient;
 import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.rest.handler.async.TriggerResponse;
 import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerHeaders;
-import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerMessageParameters;
 import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerRequestBody;
 import org.slf4j.Logger;
 
@@ -153,7 +151,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     public TriggerSavepoint.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
+        var rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean cancel = runContext.render(this.cancelJob).as(Boolean.class).orElse(false);
 
@@ -162,11 +160,11 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         String requestId;
         String savepointPath;
         try (
-            RestClusterClient<StandaloneClusterId> flinkClient = new RestClusterClient<>(
+            var flinkClient = new RestClusterClient<>(
                 FlinkRestUrl.configuration(rRestUrl),
                 StandaloneClusterId.getInstance()
             );
-            HttpClient client = HttpClient.builder()
+            var client = HttpClient.builder()
                 .runContext(runContext)
                 .build()
         ) {
@@ -187,21 +185,21 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
 
     private String triggerSavepoint(RunContext runContext, RestClusterClient<StandaloneClusterId> client, String jobId, boolean cancelJob)
         throws Exception {
-        String directory = targetDirectory == null
+        var directory = targetDirectory == null
             ? null
             : runContext.render(targetDirectory).as(String.class).orElse(null);
-        String format = runContext.render(formatType).as(String.class).orElse("CANONICAL");
-        SavepointFormatType formatType = SavepointFormatType.valueOf(format.toUpperCase(Locale.ROOT));
-        JobID flinkJobId = JobID.fromHexString(jobId);
+        var format = runContext.render(formatType).as(String.class).orElse("CANONICAL");
+        var formatType = SavepointFormatType.valueOf(format.toUpperCase(Locale.ROOT));
+        var flinkJobId = JobID.fromHexString(jobId);
         if (!cancelJob) {
             return await(client.triggerDetachedSavepoint(flinkJobId, directory, formatType));
         }
 
-        SavepointTriggerHeaders headers = SavepointTriggerHeaders.getInstance();
-        SavepointTriggerMessageParameters parameters = headers.getUnresolvedMessageParameters();
+        var headers = SavepointTriggerHeaders.getInstance();
+        var parameters = headers.getUnresolvedMessageParameters();
         parameters.jobID.resolve(flinkJobId);
         try {
-            CompletableFuture<TriggerResponse> response = client.sendRequest(
+            var response = client.sendRequest(
                 headers,
                 parameters,
                 new SavepointTriggerRequestBody(directory, cancelJob, formatType, null)
@@ -211,7 +209,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             Thread.currentThread().interrupt();
             throw e;
         } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
+            var cause = e.getCause();
             if (cause instanceof Exception exception) {
                 throw exception;
             }
@@ -229,7 +227,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
             Thread.currentThread().interrupt();
             throw e;
         } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
+            var cause = e.getCause();
             if (cause instanceof Exception exception) {
                 throw exception;
             }
@@ -244,9 +242,9 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         String jobId, String requestId) throws Exception {
 
         int timeoutSeconds = Math.max(1, runContext.render(savepointTimeout).as(Integer.class).orElse(300));
-        final int intervalSec = SAVEPOINT_POLL_INTERVAL_SECONDS;
-        final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
-        final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
+        final var intervalSec = SAVEPOINT_POLL_INTERVAL_SECONDS;
+        final var maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
+        final var deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
         // Failsafe requires a factor above 1 and a max interval above the initial interval; this keeps polling effectively fixed.
         return RetryUtils.<String, Exception> of(
@@ -283,7 +281,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
 
                 var response = client.request(request, String.class);
 
-                int statusCode = response.getStatus().getCode();
+                var statusCode = response.getStatus().getCode();
                 if (statusCode != 200) {
                     if (statusCode >= 500 || statusCode == 429) {
                         runContext.logger().warn("Transient status {} from Flink; will retry. Body: {}", statusCode, response.getBody());

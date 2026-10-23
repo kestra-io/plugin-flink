@@ -11,8 +11,8 @@ final class FlinkRestUrl {
     }
 
     static URI validate(String restUrl) {
-        URI restUri = URI.create(restUrl);
-        String scheme = restUri.getScheme();
+        var restUri = URI.create(restUrl);
+        var scheme = restUri.getScheme();
         if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
             throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
         }
@@ -23,11 +23,11 @@ final class FlinkRestUrl {
     }
 
     static String normalize(String restUrl) {
-        URI restUri = validate(restUrl);
+        var restUri = validate(restUrl);
         if (restUri.getPort() >= 0) {
             return restUrl;
         }
-        String path = restUri.getRawPath();
+        var path = restUri.getRawPath();
         return restUri.getScheme() + "://" + restUri.getRawAuthority() + ":" + RestOptions.PORT.defaultValue()
             + (path == null ? "" : path);
     }
@@ -37,12 +37,12 @@ final class FlinkRestUrl {
     }
 
     static Configuration configuration(String restUrl) {
-        URI restUri = validate(restUrl);
-        Configuration configuration = new Configuration();
+        var restUri = validate(restUrl);
+        var configuration = new Configuration();
         configuration.set(RestOptions.ADDRESS, restUri.getHost());
         configuration.set(RestOptions.PORT, restUri.getPort() < 0 ? RestOptions.PORT.defaultValue() : restUri.getPort());
 
-        String path = restUri.getRawPath();
+        var path = restUri.getRawPath();
         if (path != null) {
             path = path.replaceFirst("/+$", "");
         }

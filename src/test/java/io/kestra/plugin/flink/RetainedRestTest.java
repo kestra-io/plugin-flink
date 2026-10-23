@@ -13,7 +13,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.MockedConstruction;
 import org.mockito.Mockito;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -60,13 +59,13 @@ class RetainedRestTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID))
                 .willReturn(okJson("{\"state\":\"FAILED\",\"state-details\":\"operator failed\"}"))
         );
-        MonitorJob task = MonitorJob.builder()
+        var task = MonitorJob.builder()
             .id("retained-rest-monitor")
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jobId(Property.ofValue(JOB_ID))
             .build();
-        Submit contextTask = Submit.builder()
+        var contextTask = Submit.builder()
             .id("retained-rest-monitor-context")
             .type(Submit.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
@@ -93,9 +92,9 @@ class RetainedRestTest {
                 .whenScenarioStateIs("completed")
                 .willReturn(okJson("{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"location\":\"s3://savepoints/final\"}}"))
         );
-        TriggerSavepoint task = savepointTask(false, 20);
+        var task = savepointTask(false, 20);
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> when(
                     client.triggerDetachedSavepoint(
@@ -106,7 +105,7 @@ class RetainedRestTest {
                 ).thenReturn(CompletableFuture.completedFuture(REQUEST_ID))
             )
         ) {
-            TriggerSavepoint.Output output = task.run(runContext(task));
+            var output = task.run(runContext(task));
 
             assertThat(output.getRequestId(), is(REQUEST_ID));
             assertThat(output.getSavepointPath(), is("s3://savepoints/final"));
@@ -130,17 +129,17 @@ class RetainedRestTest {
                     )
                 )
         );
-        TriggerSavepoint task = savepointTask(true, 10);
-        TriggerResponse response = new TriggerResponse(TriggerId.fromHexString(REQUEST_ID));
+        var task = savepointTask(true, 10);
+        var response = new TriggerResponse(TriggerId.fromHexString(REQUEST_ID));
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> doReturn(CompletableFuture.completedFuture(response))
                     .when(client)
                     .sendRequest(any(), any(), any())
             )
         ) {
-            Exception exception = assertThrows(Exception.class, () -> task.run(runContext(task)));
+            var exception = assertThrows(Exception.class, () -> task.run(runContext(task)));
 
             assertThat(exceptionChain(exception), containsString("Savepoint failed: checkpoint failed"));
             verify(clients.constructed().getFirst()).sendRequest(any(), any(), any());
@@ -154,21 +153,21 @@ class RetainedRestTest {
             get(urlEqualTo("/v1/jobs/" + JOB_ID + "/savepoints/" + REQUEST_ID))
                 .willReturn(okJson("{\"status\":{\"id\":\"COMPLETED\"},\"operation\":{\"location\":\"s3://savepoints/canceled\"}}"))
         );
-        TriggerSavepoint task = savepointTask(true, 10);
-        TriggerResponse response = new TriggerResponse(TriggerId.fromHexString(REQUEST_ID));
+        var task = savepointTask(true, 10);
+        var response = new TriggerResponse(TriggerId.fromHexString(REQUEST_ID));
         try (
-            MockedConstruction<RestClusterClient> clients = Mockito.mockConstruction(
+            var clients = Mockito.mockConstruction(
                 RestClusterClient.class,
                 (client, context) -> doReturn(CompletableFuture.completedFuture(response))
                     .when(client)
                     .sendRequest(any(), any(), any())
             )
         ) {
-            TriggerSavepoint.Output output = task.run(runContext(task));
+            var output = task.run(runContext(task));
 
             assertThat(output.getRequestId(), is(REQUEST_ID));
             assertThat(output.getSavepointPath(), is("s3://savepoints/canceled"));
-            ArgumentCaptor<SavepointTriggerRequestBody> bodyCaptor = ArgumentCaptor.forClass(SavepointTriggerRequestBody.class);
+            var bodyCaptor = ArgumentCaptor.forClass(SavepointTriggerRequestBody.class);
             verify(clients.constructed().getFirst()).sendRequest(any(), any(), bodyCaptor.capture());
             assertThat(bodyCaptor.getValue().isCancelJob(), is(true));
             server.verify(getRequestedFor(urlEqualTo("/v1/jobs/" + JOB_ID + "/savepoints/" + REQUEST_ID)));
@@ -191,7 +190,7 @@ class RetainedRestTest {
     }
 
     private String exceptionChain(Throwable throwable) {
-        StringBuilder messages = new StringBuilder();
+        var messages = new StringBuilder();
         for (Throwable current = throwable; current != null; current = current.getCause()) {
             messages.append(current.getMessage()).append('\n');
         }

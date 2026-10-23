@@ -1,6 +1,5 @@
 package io.kestra.plugin.flink;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.configuration.SecurityOptions;
 import org.junit.jupiter.api.Test;
@@ -12,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FlinkRestUrlTest {
     @Test
     void normalizeAddsDefaultPortAndPreservesRawPath() {
-        String normalized = FlinkRestUrl.normalize("http://flink.example/base%2Fpath///");
+        var normalized = FlinkRestUrl.normalize("http://flink.example/base%2Fpath///");
 
         assertEquals(
             "http://flink.example:" + RestOptions.PORT.defaultValue() + "/base%2Fpath///",
@@ -22,7 +21,7 @@ class FlinkRestUrlTest {
 
     @Test
     void endpointAddsDefaultPortAndRemovesTrailingSlashes() {
-        String endpoint = FlinkRestUrl.endpoint("https://flink.example/base///", "/v1/jobs");
+        var endpoint = FlinkRestUrl.endpoint("https://flink.example/base///", "/v1/jobs");
 
         assertEquals(
             "https://flink.example:" + RestOptions.PORT.defaultValue() + "/base/v1/jobs",
@@ -40,7 +39,7 @@ class FlinkRestUrlTest {
 
     @Test
     void configurationPreservesFlinkRestSettings() {
-        Configuration configuration = FlinkRestUrl.configuration("https://flink.example/base%2Fpath///");
+        var configuration = FlinkRestUrl.configuration("https://flink.example/base%2Fpath///");
 
         assertEquals("flink.example", configuration.get(RestOptions.ADDRESS));
         assertEquals(RestOptions.PORT.defaultValue(), configuration.get(RestOptions.PORT));
@@ -50,7 +49,7 @@ class FlinkRestUrlTest {
 
     @Test
     void configurationPreservesOrdinaryPathAndRemovesTrailingSlashes() {
-        Configuration configuration = FlinkRestUrl.configuration("http://flink.example/base/path///");
+        var configuration = FlinkRestUrl.configuration("http://flink.example/base/path///");
 
         assertEquals("/base/path", configuration.get(RestOptions.PATH));
     }

@@ -20,7 +20,6 @@ import org.slf4j.Logger;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -136,14 +135,14 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean failOnErr = runContext.render(this.failOnError).as(Boolean.class).orElse(true);
-        JobID flinkJobId = JobID.fromHexString(rJobId);
+        var flinkJobId = JobID.fromHexString(rJobId);
         var configuration = FlinkRestUrl.configuration(rRestUrl);
 
         logger.debug("Polling Flink job status: {}", rJobId);
 
         JobStatus status;
         try (
-            RestClusterClient<StandaloneClusterId> client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
+            var client = new RestClusterClient<>(configuration, StandaloneClusterId.getInstance())
         ) {
             org.apache.flink.api.common.JobStatus flinkStatus;
             try {
@@ -152,7 +151,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                 Thread.currentThread().interrupt();
                 throw e;
             } catch (ExecutionException e) {
-                Throwable failure = e.getCause() == null ? e : e.getCause();
+                var failure = e.getCause() == null ? e : e.getCause();
                 if (isJobNotFound(failure)) {
                     throw new RuntimeException("Job not found: " + rJobId, failure);
                 }
@@ -166,7 +165,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                 throw e;
             }
 
-            String state = flinkStatus.name();
+            var state = flinkStatus.name();
             String stateDetails = null;
             if (isTerminalState(state)) {
                 try {
@@ -186,8 +185,8 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         logger.debug("Job {} current status: {}", rJobId, status.getState());
 
         if (isTerminalState(status.getState())) {
-            java.util.List<String> expectedStates = getExpectedTerminalStates(runContext);
-            boolean isSuccess = expectedStates.contains(status.getState());
+            var expectedStates = getExpectedTerminalStates(runContext);
+            var isSuccess = expectedStates.contains(status.getState());
 
             if (!isSuccess && failOnErr && "FAILED".equals(status.getState())) {
                 logger.error("Job {} failed: {}", rJobId, status.getStateDetails());
@@ -195,7 +194,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                 logger.info("Job {} reached terminal state: {} (success: {})", rJobId, status.getState(), isSuccess);
             }
 
-            Map<String, Object> triggerOutputs = Map.of(
+            var triggerOutputs = Map.<String, Object> of(
                 "jobId", rJobId,
                 "finalState", status.getState(),
                 "stateDetails", status.getStateDetails() != null ? status.getStateDetails() : "",
@@ -230,7 +229,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         if (interval == null) {
             return DEFAULT_INTERVAL;
         }
-        String configuredInterval = interval.toString();
+        var configuredInterval = interval.toString();
         if (PebbleUtil.containsOpeningBlockDelimiter(configuredInterval)) {
             return DEFAULT_INTERVAL;
         }
@@ -243,16 +242,16 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     String getStateDetails(RunContext runContext, String restUrl, String jobId) throws Exception {
         try (
-            HttpClient client = HttpClient.builder()
+            var client = HttpClient.builder()
                 .runContext(runContext)
                 .build()
         ) {
-            HttpRequest request = HttpRequest.builder()
+            var request = HttpRequest.builder()
                 .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId)))
                 .method("GET")
                 .build();
 
-            HttpResponse<String> response = client.request(request, String.class);
+            var response = client.request(request, String.class);
             if (response.getStatus().getCode() == 404) {
                 return null;
             }
@@ -266,7 +265,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     }
 
     private boolean isJobNotFound(Throwable throwable) {
-        Throwable cause = throwable;
+        var cause = throwable;
         while (cause != null) {
             if (cause instanceof FlinkJobNotFoundException) {
                 return true;
@@ -280,13 +279,13 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     }
 
     private boolean isTransientFailure(Throwable throwable) {
-        Throwable cause = throwable;
+        var cause = throwable;
         while (cause != null) {
             if (cause instanceof IOException || cause instanceof TimeoutException) {
                 return true;
             }
             if (cause instanceof RestClientException restException) {
-                int statusCode = restException.getHttpResponseStatus().code();
+                var statusCode = restException.getHttpResponseStatus().code();
                 return statusCode == 429 || statusCode >= 500;
             }
             cause = cause.getCause();
