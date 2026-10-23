@@ -16,6 +16,8 @@ import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.http.client.configurations.TimeoutConfiguration;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -197,11 +199,24 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         }
     }
 
+    HttpConfiguration httpConfiguration(RunContext runContext) throws IllegalVariableEvaluationException {
+        int rConnectionTimeout = runContext.render(connectionTimeout).as(Integer.class).orElse(30);
+
+        return HttpConfiguration.builder()
+            .timeout(
+                TimeoutConfiguration.builder()
+                    .connectTimeout(Property.ofValue(Duration.ofSeconds(rConnectionTimeout)))
+                    .build()
+            )
+            .build();
+    }
+
     private String createOrGetSession(RunContext runContext, String gatewayUrl)
         throws Exception {
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
+            .configuration(httpConfiguration(runContext))
             .build();
 
         String sessionName = this.sessionName != null ? runContext.render(this.sessionName).as(String.class).orElse(null) : null;
@@ -272,6 +287,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
+            .configuration(httpConfiguration(runContext))
             .build();
 
         ObjectNode payload = JSON.createObjectNode().put("statement", statement);
@@ -302,6 +318,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
         HttpClient client = HttpClient.builder()
             .runContext(runContext)
+            .configuration(httpConfiguration(runContext))
             .build();
 
         int timeout = Math.max(1, runContext.render(statementTimeout).as(Integer.class).orElse(300));
@@ -385,6 +402,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         try {
             HttpClient client = HttpClient.builder()
                 .runContext(runContext)
+                .configuration(httpConfiguration(runContext))
                 .build();
 
             HttpRequest request = HttpRequest.builder()
