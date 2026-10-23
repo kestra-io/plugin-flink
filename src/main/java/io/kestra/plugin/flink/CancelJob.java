@@ -9,11 +9,9 @@ import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.configuration.RestOptions;
 import org.slf4j.Logger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.http.HttpRequest;
@@ -153,7 +151,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     public CancelJob.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String rRestUrl = normalizeRestUrl(runContext.render(this.restUrl).as(String.class).orElseThrow());
+        String rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean withSp = runContext.render(this.withSavepoint).as(Boolean.class).orElse(false);
         Boolean drain = runContext.render(this.drainJob).as(Boolean.class).orElse(false);
@@ -220,13 +218,13 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         String jobId,
         String savepointDirectory,
         Instant deadline) throws Exception {
-        Map<String, Object> payload = new LinkedHashMap<>();
+        var payload = new LinkedHashMap<String, Object>();
         payload.put("target-directory", savepointDirectory);
         payload.put("cancel-job", true);
         payload.put("formatType", "CANONICAL");
         String requestId = triggerOperation(
             client,
-            restEndpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints"),
+            FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints"),
             payload,
             "savepoint cancellation"
         );
@@ -240,7 +238,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         String jobId,
         String savepointDirectory,
         Instant deadline) throws Exception {
-        Map<String, Object> payload = new LinkedHashMap<>();
+        var payload = new LinkedHashMap<String, Object>();
         if (savepointDirectory != null) {
             payload.put("targetDirectory", savepointDirectory);
         }
@@ -248,7 +246,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         payload.put("formatType", "CANONICAL");
         String requestId = triggerOperation(
             client,
-            restEndpoint(restUrl, "/v1/jobs/" + jobId + "/stop"),
+            FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/stop"),
             payload,
             "draining stop"
         );
@@ -257,13 +255,13 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
 
     private String triggerOperation(HttpClient client, String endpoint, Map<String, Object> payload, String operation)
         throws Exception {
-        HttpRequest request = HttpRequest.builder()
+        var request = HttpRequest.builder()
             .uri(URI.create(endpoint))
             .method("POST")
             .addHeader("Content-Type", "application/json")
             .body(HttpRequest.StringRequestBody.builder().content(JSON.writeValueAsString(payload)).build())
             .build();
-        HttpResponse<String> response = client.request(request, String.class);
+        var response = client.request(request, String.class);
         if (response.getStatus().getCode() != 202) {
             throw new RuntimeException(
                 "Failed to trigger " + operation + ": " + response.getStatus().getCode() + " - " + response.getBody()
@@ -295,9 +293,9 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 () ->
                 {
                     ensureBeforeDeadline(deadline, timeoutSeconds);
-                    HttpResponse<String> response = requestStatus(
+                    var response = requestStatus(
                         client,
-                        restEndpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints/" + requestId),
+                        FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints/" + requestId),
                         "savepoint"
                     );
                     int statusCode = response.getStatus().getCode();
@@ -311,17 +309,17 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                         );
                     }
 
-                    JsonNode root = JSON.readTree(response.getBody());
-                    String state = root.path("status").path("id").asText();
+                    var root = JSON.readTree(response.getBody());
+                    var state = root.path("status").path("id").asText();
                     if ("COMPLETED".equals(state)) {
-                        String path = root.path("operation").path("location").asText(null);
+                        var path = root.path("operation").path("location").asText(null);
                         if (path == null) {
                             throw new IllegalStateException("Flink completed the savepoint without returning its path");
                         }
                         return path;
                     }
                     if ("FAILED".equals(state)) {
-                        String failure = root.path("operation").path("failure-cause").path("message").asText("Unknown error");
+                        var failure = root.path("operation").path("failure-cause").path("message").asText("Unknown error");
                         throw new NonRetriableCancellationException("Savepoint failed: " + failure);
                     }
                     return null;
@@ -337,11 +335,11 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private void cancelJob(HttpClient client, String restUrl, String jobId) throws Exception {
-        HttpRequest request = HttpRequest.builder()
-            .uri(URI.create(restEndpoint(restUrl, "/v1/jobs/" + jobId)))
+        var request = HttpRequest.builder()
+            .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId)))
             .method("PATCH")
             .build();
-        HttpResponse<String> response = client.request(request, String.class);
+        var response = client.request(request, String.class);
         if (response.getStatus().getCode() != 202) {
             throw new RuntimeException(
                 "Failed to cancel job: " + response.getStatus().getCode() + " - " + response.getBody()
@@ -371,9 +369,9 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                 () ->
                 {
                     ensureBeforeDeadline(deadline, timeoutSeconds);
-                    HttpResponse<String> response = requestStatus(
+                    var response = requestStatus(
                         client,
-                        restEndpoint(restUrl, "/v1/jobs/" + jobId),
+                        FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId),
                         "job"
                     );
                     int statusCode = response.getStatus().getCode();
@@ -389,7 +387,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
                             "Failed to check job status: " + statusCode + " - " + response.getBody()
                         );
                     }
-                    String state = JSON.readTree(response.getBody()).path("state").asText();
+                    var state = JSON.readTree(response.getBody()).path("state").asText();
                     if ("FINISHED".equals(state) || "FAILED".equals(state) || "CANCELED".equals(state)) {
                         return true;
                     }
@@ -405,7 +403,7 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     }
 
     private HttpResponse<String> requestStatus(HttpClient client, String endpoint, String operation) throws Exception {
-        HttpRequest request = HttpRequest.builder()
+        var request = HttpRequest.builder()
             .uri(URI.create(endpoint))
             .method("GET")
             .build();
@@ -475,28 +473,6 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
             throw new IllegalStateException("Could not extract request ID from Flink response: " + responseBody);
         }
         return requestId;
-    }
-
-    private String normalizeRestUrl(String restUrl) {
-        URI restUri = URI.create(restUrl);
-        String scheme = restUri.getScheme();
-        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
-        }
-        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
-            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
-        }
-
-        if (restUri.getPort() >= 0) {
-            return restUrl;
-        }
-        String path = restUri.getRawPath();
-        return scheme + "://" + restUri.getRawAuthority() + ":" + RestOptions.PORT.defaultValue()
-            + (path == null ? "" : path);
-    }
-
-    private String restEndpoint(String restUrl, String endpoint) {
-        return restUrl.replaceFirst("/+$", "") + endpoint;
     }
 
     @Builder

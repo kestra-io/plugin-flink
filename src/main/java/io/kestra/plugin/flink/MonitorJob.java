@@ -14,9 +14,6 @@ import java.util.regex.Pattern;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.client.deployment.StandaloneClusterId;
 import org.apache.flink.client.program.rest.RestClusterClient;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.RestOptions;
-import org.apache.flink.configuration.SecurityOptions;
 import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
 import org.apache.flink.runtime.rest.util.RestClientException;
 import org.slf4j.Logger;
@@ -37,6 +34,7 @@ import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.PebbleUtil;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -89,6 +87,7 @@ import lombok.experimental.SuperBuilder;
     }
 )
 public class MonitorJob extends AbstractTrigger implements PollingTriggerInterface {
+    private static final Duration DEFAULT_INTERVAL = Duration.ofSeconds(10);
 
     @Schema(
         title = "Flink REST API URL",
@@ -138,7 +137,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean failOnErr = runContext.render(this.failOnError).as(Boolean.class).orElse(true);
         JobID flinkJobId = JobID.fromHexString(rJobId);
-        Configuration configuration = createConfiguration(rRestUrl);
+        var configuration = FlinkRestUrl.configuration(rRestUrl);
 
         logger.debug("Polling Flink job status: {}", rJobId);
 
@@ -229,11 +228,11 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     @Override
     public Duration getInterval() {
         if (interval == null) {
-            return Duration.parse("PT10S");
+            return DEFAULT_INTERVAL;
         }
         String configuredInterval = interval.toString();
-        if (configuredInterval.contains("{")) {
-            return Duration.parse("PT10S");
+        if (PebbleUtil.containsOpeningBlockDelimiter(configuredInterval)) {
+            return DEFAULT_INTERVAL;
         }
         try {
             return Duration.parse(configuredInterval);
@@ -249,7 +248,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
                 .build()
         ) {
             HttpRequest request = HttpRequest.builder()
-                .uri(URI.create(restEndpoint(restUrl, "/v1/jobs/" + jobId)))
+                .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId)))
                 .method("GET")
                 .build();
 
@@ -264,48 +263,6 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
             }
             return extractJsonValue(response.getBody(), "state-details");
         }
-    }
-
-    private Configuration createConfiguration(String restUrl) {
-        URI restUri = validateRestUrl(restUrl);
-        Configuration configuration = new Configuration();
-        configuration.set(RestOptions.ADDRESS, restUri.getHost());
-        configuration.set(RestOptions.PORT, restUri.getPort() < 0 ? RestOptions.PORT.defaultValue() : restUri.getPort());
-
-        String path = restUri.getPath();
-        if (path != null) {
-            path = path.replaceFirst("/+$", "");
-        }
-        if (path != null && !path.isEmpty()) {
-            configuration.set(RestOptions.PATH, path);
-        }
-        if ("https".equalsIgnoreCase(restUri.getScheme())) {
-            configuration.set(SecurityOptions.SSL_REST_ENABLED, true);
-        }
-        return configuration;
-    }
-
-    private String restEndpoint(String restUrl, String endpoint) {
-        URI restUri = validateRestUrl(restUrl);
-        String baseUrl = restUrl;
-        if (restUri.getPort() < 0) {
-            String path = restUri.getRawPath();
-            baseUrl = restUri.getScheme() + "://" + restUri.getRawAuthority() + ":" + RestOptions.PORT.defaultValue()
-                + (path == null ? "" : path);
-        }
-        return baseUrl.replaceFirst("/+$", "") + endpoint;
-    }
-
-    private URI validateRestUrl(String restUrl) {
-        URI restUri = URI.create(restUrl);
-        String scheme = restUri.getScheme();
-        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
-        }
-        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
-            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
-        }
-        return restUri;
     }
 
     private boolean isJobNotFound(Throwable throwable) {

@@ -4,13 +4,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.flink.configuration.RestOptions;
 import org.slf4j.Logger;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
@@ -23,6 +25,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -68,6 +71,7 @@ import lombok.experimental.SuperBuilder;
     }
 )
 public class Submit extends Task implements RunnableTask<Submit.Output> {
+    private static final ObjectMapper JSON = JacksonMapper.ofJson();
 
     @Schema(
         title = "Flink REST API URL",
@@ -135,7 +139,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
         String rJarUri = runContext.render(this.jarUri).as(String.class).orElseThrow();
         String rEntryClass = runContext.render(this.entryClass).as(String.class).orElseThrow();
-        String rRestUrl = normalizeRestUrl(runContext.render(this.restUrl).as(String.class).orElseThrow());
+        String rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
 
         logger.info("Submitting Flink job: {} from {}", rEntryClass, rJarUri);
 
@@ -197,7 +201,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
             System.arraycopy(suffixBytes, 0, fullBody, prefixBytes.length + jarContent.length, suffixBytes.length);
 
             HttpRequest request = HttpRequest.builder()
-                .uri(URI.create(restEndpoint(restUrl, "/v1/jars/upload")))
+                .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jars/upload")))
                 .method("POST")
                 .addHeader("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .body(
@@ -229,7 +233,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
                 .runContext(runContext)
                 .build()
         ) {
-            Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            var payload = new LinkedHashMap<String, Object>();
             payload.put("entryClass", entryClass);
 
             if (parallelism != null) {
@@ -276,12 +280,10 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
                 }
             }
 
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-
-            String requestBody = mapper.writeValueAsString(payload);
+            String requestBody = JSON.writeValueAsString(payload);
 
             HttpRequest request = HttpRequest.builder()
-                .uri(URI.create(restEndpoint(restUrl, "/v1/jars/" + jarId + "/run")))
+                .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jars/" + jarId + "/run")))
                 .method("POST")
                 .addHeader("Content-Type", "application/json")
                 .body(
@@ -304,37 +306,6 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
             return extractJobIdFromResponse(response.getBody());
         }
-    }
-
-    private String normalizeRestUrl(String restUrl) {
-        URI restUri = URI.create(restUrl);
-        String scheme = restUri.getScheme();
-        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
-        }
-        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
-            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
-        }
-        if (restUri.getPort() >= 0) {
-            return restUrl;
-        }
-
-        StringBuilder normalizedUrl = new StringBuilder()
-            .append(scheme)
-            .append("://")
-            .append(restUri.getRawAuthority())
-            .append(':')
-            .append(RestOptions.PORT.defaultValue());
-        String path = restUri.getRawPath();
-        if (path != null) {
-            path = path.replaceFirst("/+$", "");
-            normalizedUrl.append(path);
-        }
-        return normalizedUrl.toString();
-    }
-
-    private String restEndpoint(String restUrl, String endpoint) {
-        return restUrl.replaceFirst("/+$", "") + endpoint;
     }
 
     private String extractJarIdFromResponse(String responseBody) {

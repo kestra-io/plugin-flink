@@ -111,7 +111,7 @@ class RetainedRestTest {
             assertThat(output.getRequestId(), is(REQUEST_ID));
             assertThat(output.getSavepointPath(), is("s3://savepoints/final"));
             assertThat(output.getJobId(), is(JOB_ID));
-            verify(clients.constructed().get(0)).triggerDetachedSavepoint(
+            verify(clients.constructed().getFirst()).triggerDetachedSavepoint(
                 eq(JobID.fromHexString(JOB_ID)),
                 isNull(),
                 eq(SavepointFormatType.CANONICAL)
@@ -143,7 +143,7 @@ class RetainedRestTest {
             Exception exception = assertThrows(Exception.class, () -> task.run(runContext(task)));
 
             assertThat(exceptionChain(exception), containsString("Savepoint failed: checkpoint failed"));
-            verify(clients.constructed().get(0)).sendRequest(any(), any(), any());
+            verify(clients.constructed().getFirst()).sendRequest(any(), any(), any());
             server.verify(getRequestedFor(urlEqualTo("/v1/jobs/" + JOB_ID + "/savepoints/" + REQUEST_ID)));
         }
     }
@@ -169,7 +169,7 @@ class RetainedRestTest {
             assertThat(output.getRequestId(), is(REQUEST_ID));
             assertThat(output.getSavepointPath(), is("s3://savepoints/canceled"));
             ArgumentCaptor<SavepointTriggerRequestBody> bodyCaptor = ArgumentCaptor.forClass(SavepointTriggerRequestBody.class);
-            verify(clients.constructed().get(0)).sendRequest(any(), any(), bodyCaptor.capture());
+            verify(clients.constructed().getFirst()).sendRequest(any(), any(), bodyCaptor.capture());
             assertThat(bodyCaptor.getValue().isCancelJob(), is(true));
             server.verify(getRequestedFor(urlEqualTo("/v1/jobs/" + JOB_ID + "/savepoints/" + REQUEST_ID)));
         }

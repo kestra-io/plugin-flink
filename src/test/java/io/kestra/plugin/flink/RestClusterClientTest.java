@@ -412,7 +412,7 @@ class RestClusterClientTest {
             assertThat(execution.orElseThrow().getOutputs().get("jobId"), is(JOB_ID));
             assertThat(execution.orElseThrow().getOutputs().get("finalState"), is("FINISHED"));
             assertThat(execution.orElseThrow().getOutputs().get("stateDetails"), is("completed with warnings"));
-            Mockito.verify(clients.constructed().get(0)).getJobStatus(Mockito.eq(JobID.fromHexString(JOB_ID)));
+            Mockito.verify(clients.constructed().getFirst()).getJobStatus(Mockito.eq(JobID.fromHexString(JOB_ID)));
             server.verify(getRequestedFor(urlEqualTo("/v1/jobs/" + JOB_ID)));
         }
     }
@@ -562,7 +562,7 @@ class RestClusterClientTest {
             assertThat(execution.orElseThrow().getOutputs().get("finalState"), is(expectedState));
             assertThat(execution.orElseThrow().getOutputs().get("stateDetails"), is(details));
             assertThat(execution.orElseThrow().getOutputs().get("success"), is(true));
-            Mockito.verify(clients.constructed().get(0)).getJobStatus(Mockito.eq(JobID.fromHexString(JOB_ID)));
+            Mockito.verify(clients.constructed().getFirst()).getJobStatus(Mockito.eq(JobID.fromHexString(JOB_ID)));
             server.verify(getRequestedFor(urlEqualTo("/v1/jobs/" + JOB_ID)));
         }
     }

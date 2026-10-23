@@ -9,9 +9,6 @@ import java.util.concurrent.ExecutionException;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.client.deployment.StandaloneClusterId;
 import org.apache.flink.client.program.rest.RestClusterClient;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.RestOptions;
-import org.apache.flink.configuration.SecurityOptions;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.rest.handler.async.TriggerResponse;
 import org.apache.flink.runtime.rest.messages.job.savepoints.SavepointTriggerHeaders;
@@ -24,7 +21,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -102,6 +98,9 @@ import lombok.experimental.SuperBuilder;
 public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepoint.Output> {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int SAVEPOINT_POLL_INTERVAL_SECONDS = 5;
+    private static final int SAVEPOINT_MAX_RETRY_INTERVAL_SECONDS = SAVEPOINT_POLL_INTERVAL_SECONDS + 1;
+    private static final double SAVEPOINT_RETRY_DELAY_FACTOR = 1.0001;
 
     @Schema(
         title = "Flink REST API URL",
@@ -154,7 +153,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
     public TriggerSavepoint.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        String rRestUrl = normalizeRestUrl(runContext.render(this.restUrl).as(String.class).orElseThrow());
+        String rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
         String rJobId = runContext.render(this.jobId).as(String.class).orElseThrow();
         Boolean cancel = runContext.render(this.cancelJob).as(Boolean.class).orElse(false);
 
@@ -164,7 +163,7 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         String savepointPath;
         try (
             RestClusterClient<StandaloneClusterId> flinkClient = new RestClusterClient<>(
-                createConfiguration(URI.create(rRestUrl)),
+                FlinkRestUrl.configuration(rRestUrl),
                 StandaloneClusterId.getInstance()
             );
             HttpClient client = HttpClient.builder()
@@ -223,24 +222,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         }
     }
 
-    private Configuration createConfiguration(URI restUri) {
-        Configuration configuration = new Configuration();
-        configuration.set(RestOptions.ADDRESS, restUri.getHost());
-        configuration.set(RestOptions.PORT, restUri.getPort() < 0 ? RestOptions.PORT.defaultValue() : restUri.getPort());
-
-        String path = restUri.getPath();
-        if (path != null) {
-            path = path.replaceFirst("/+$", "");
-        }
-        if (path != null && !path.isEmpty()) {
-            configuration.set(RestOptions.PATH, path);
-        }
-        if ("https".equalsIgnoreCase(restUri.getScheme())) {
-            configuration.set(SecurityOptions.SSL_REST_ENABLED, true);
-        }
-        return configuration;
-    }
-
     private <T> T await(CompletableFuture<T> future) throws Exception {
         try {
             return future.get();
@@ -263,15 +244,16 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         String jobId, String requestId) throws Exception {
 
         int timeoutSeconds = Math.max(1, runContext.render(savepointTimeout).as(Integer.class).orElse(300));
-        final int intervalSec = 5;
+        final int intervalSec = SAVEPOINT_POLL_INTERVAL_SECONDS;
         final int maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
         final java.time.Instant deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
+        // Failsafe requires a factor above 1 and a max interval above the initial interval; this keeps polling effectively fixed.
         return RetryUtils.<String, Exception> of(
             Exponential.builder()
-                .delayFactor(1.0001)
+                .delayFactor(SAVEPOINT_RETRY_DELAY_FACTOR)
                 .interval(Duration.ofSeconds(intervalSec))
-                .maxInterval(Duration.ofSeconds(intervalSec + 1L))
+                .maxInterval(Duration.ofSeconds(SAVEPOINT_MAX_RETRY_INTERVAL_SECONDS))
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
@@ -294,12 +276,12 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
                     throw new java.util.concurrent.TimeoutException("Timed out waiting for savepoint completion after " + timeoutSeconds + "s");
                 }
 
-                HttpRequest request = HttpRequest.builder()
-                    .uri(URI.create(restEndpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints/" + requestId)))
+                var request = HttpRequest.builder()
+                    .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jobs/" + jobId + "/savepoints/" + requestId)))
                     .method("GET")
                     .build();
 
-                HttpResponse<String> response = client.request(request, String.class);
+                var response = client.request(request, String.class);
 
                 int statusCode = response.getStatus().getCode();
                 if (statusCode != 200) {
@@ -324,37 +306,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
                 return null;
             }
         );
-    }
-
-    private String normalizeRestUrl(String restUrl) {
-        URI restUri = URI.create(restUrl);
-        String scheme = restUri.getScheme();
-        if (restUri.getHost() == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
-            throw new IllegalArgumentException("restUrl must be an HTTP or HTTPS URL with a host: " + restUrl);
-        }
-        if (restUri.getRawQuery() != null || restUri.getRawFragment() != null) {
-            throw new IllegalArgumentException("restUrl must not include query parameters or a fragment: " + restUrl);
-        }
-        if (restUri.getPort() >= 0) {
-            return restUrl;
-        }
-
-        StringBuilder normalizedUrl = new StringBuilder()
-            .append(scheme)
-            .append("://")
-            .append(restUri.getRawAuthority())
-            .append(':')
-            .append(RestOptions.PORT.defaultValue());
-        String path = restUri.getRawPath();
-        if (path != null) {
-            path = path.replaceFirst("/+$", "");
-            normalizedUrl.append(path);
-        }
-        return normalizedUrl.toString();
-    }
-
-    private String restEndpoint(String restUrl, String endpoint) {
-        return restUrl.replaceFirst("/+$", "") + endpoint;
     }
 
     private String extractSavepointStatusFromResponse(String responseBody) {
