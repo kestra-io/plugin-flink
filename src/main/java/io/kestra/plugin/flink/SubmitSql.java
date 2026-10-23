@@ -67,6 +67,8 @@ import lombok.experimental.SuperBuilder;
                       configuration:
                         execution.runtime-mode: "streaming"
                         execution.checkpointing.interval: "30s"
+
+                # The SQL Gateway must be reachable; the configured catalog and source/target tables must exist.
                 """
         ),
         @Example(
@@ -91,6 +93,8 @@ import lombok.experimental.SuperBuilder;
                     sessionConfig:
                       configuration:
                         execution.runtime-mode: "batch"
+
+                # The SQL Gateway must be reachable; the referenced source table and required SQL objects must exist.
                 """
         )
     }
@@ -149,6 +153,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         title = "Acceptable terminal states",
         description = "Operation states treated as success. For streaming include RUNNING to keep the session open. Defaults to ['FINISHED', 'RUNNING']."
     )
+    @PluginProperty(group = "execution")
     private Property<java.util.List<String>> acceptableStates;
 
     @Override
@@ -509,8 +514,22 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
     @Builder
     @Getter
     public static class SessionConfig {
+        @Schema(
+            title = "Catalog",
+            description = "Catalog to use for the SQL session."
+        )
         private final String catalog;
+
+        @Schema(
+            title = "Database",
+            description = "Database to use for the SQL session."
+        )
         private final String database;
+
+        @Schema(
+            title = "Configuration",
+            description = "Flink configuration options applied to the SQL session."
+        )
         private final Map<String, String> configuration;
     }
 

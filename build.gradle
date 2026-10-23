@@ -50,6 +50,9 @@ dependencies {
     annotationProcessor group: "io.kestra", name: "processor", version: kestraVersion
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
+
+    // Apache Flink
+    implementation "org.apache.flink:flink-clients:2.0.2"
 }
 
 
@@ -88,6 +91,8 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
     testImplementation "org.hamcrest:hamcrest"
     testImplementation "org.hamcrest:hamcrest-library"
+    testImplementation "org.mockito:mockito-core"
+    testImplementation "org.wiremock:wiremock-standalone:3.13.1"
 }
 
 /**********************************************************************************************************************\

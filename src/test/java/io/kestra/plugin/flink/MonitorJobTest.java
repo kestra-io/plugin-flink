@@ -57,4 +57,43 @@ class MonitorJobTest {
         assertThat(monitor.getInterval(), is(Duration.parse("PT10S")));
         assertThat(monitor.getFailOnError(), notNullValue());
     }
+
+    @Test
+    void testMonitorJobUsesConfiguredInterval() {
+        var monitor = MonitorJob.builder()
+            .id("test-monitor-custom-interval")
+            .type(MonitorJob.class.getName())
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue("test-job-id"))
+            .interval(Property.ofValue(Duration.parse("PT30S")))
+            .build();
+
+        assertThat(monitor.getInterval(), is(Duration.parse("PT30S")));
+    }
+
+    @Test
+    void testMonitorJobKeepsDefaultForTemplatedInterval() {
+        var monitor = MonitorJob.builder()
+            .id("test-monitor-templated-interval")
+            .type(MonitorJob.class.getName())
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue("test-job-id"))
+            .interval(Property.ofExpression("{{ inputs.interval }}"))
+            .build();
+
+        assertThat(monitor.getInterval(), is(Duration.parse("PT10S")));
+    }
+
+    @Test
+    void testMonitorJobKeepsDefaultForNullInterval() {
+        var monitor = MonitorJob.builder()
+            .id("test-monitor-null-interval")
+            .type(MonitorJob.class.getName())
+            .restUrl(Property.ofValue("http://localhost:8081"))
+            .jobId(Property.ofValue("test-job-id"))
+            .interval(null)
+            .build();
+
+        assertThat(monitor.getInterval(), is(Duration.parse("PT10S")));
+    }
 }

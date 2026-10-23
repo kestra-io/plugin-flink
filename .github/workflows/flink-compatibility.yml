@@ -1,0 +1,59 @@
+name: Flink compatibility
+
+on:
+  push:
+    branches:
+      - main
+      - releases/*
+  pull_request:
+    branches:
+      - main
+      - releases/*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Flink ${{ matrix.flink_version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flink_version: 1.20.1
+            compose_file: docker-compose-ci.yml
+          - flink_version: 2.0.0
+            compose_file: docker-compose-ci-2.0.yml
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Start Flink and wait for readiness
+        run: bash .github/setup-unit.sh "${{ matrix.compose_file }}" "${{ matrix.flink_version }}"
+
+      - name: Run real-cluster compatibility tests
+        run: >-
+          ./gradlew --no-daemon flinkCompatibilityTest
+          -PflinkCompatibilityVersion=${{ matrix.flink_version }}
+          -PflinkCompatibilityComposeFile=${{ matrix.compose_file }}
+
+      - name: Collect Flink logs on failure
+        if: failure()
+        run: docker compose -f "${{ matrix.compose_file }}" logs --no-color
+
+      - name: Stop Flink cluster
+        if: always()
+        run: docker compose -f "${{ matrix.compose_file }}" down --remove-orphans
