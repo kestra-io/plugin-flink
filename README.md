@@ -47,6 +47,11 @@
 
 - Provides plugin components under `io.kestra.plugin.flink`.
 - Includes classes such as `MonitorJob`, `CancelJob`, `TriggerSavepoint`, `Submit`.
+- The real-cluster compatibility configurations are tested against Flink 1.20.1 and 2.0.0.
+
+## Security considerations
+
+The Flink REST URL is configurable task input. Its URL validation checks syntax and normalizes the endpoint; it is not an outbound network access control. Deployments must restrict egress from Kestra workers to approved Flink REST endpoints and deny access to unintended internal or external destinations.
 
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)

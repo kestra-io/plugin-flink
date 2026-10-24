@@ -20,6 +20,7 @@ import com.github.tomakehurst.wiremock.stubbing.Scenario;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.TestsUtils;
@@ -185,7 +186,7 @@ class RetainedRestTest {
             .build();
     }
 
-    private RunContext runContext(io.kestra.core.models.tasks.Task task) {
+    private RunContext runContext(Task task) {
         return TestsUtils.mockRunContext(runContextFactory, task, new HashMap<>());
     }
 

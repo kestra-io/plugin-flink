@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -42,18 +44,28 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Start Flink and wait for readiness
-        run: bash .github/setup-unit.sh "${{ matrix.compose_file }}" "${{ matrix.flink_version }}"
+        env:
+          COMPOSE_FILE: ${{ matrix.compose_file }}
+          FLINK_VERSION: ${{ matrix.flink_version }}
+        run: bash .github/setup-unit.sh "$COMPOSE_FILE" "$FLINK_VERSION"
 
       - name: Run real-cluster compatibility tests
+        env:
+          COMPOSE_FILE: ${{ matrix.compose_file }}
+          FLINK_VERSION: ${{ matrix.flink_version }}
         run: >-
           ./gradlew --no-daemon flinkCompatibilityTest
-          -PflinkCompatibilityVersion=${{ matrix.flink_version }}
-          -PflinkCompatibilityComposeFile=${{ matrix.compose_file }}
+          "-PflinkCompatibilityVersion=$FLINK_VERSION"
+          "-PflinkCompatibilityComposeFile=$COMPOSE_FILE"
 
       - name: Collect Flink logs on failure
         if: failure()
-        run: docker compose -f "${{ matrix.compose_file }}" logs --no-color
+        env:
+          COMPOSE_FILE: ${{ matrix.compose_file }}
+        run: docker compose -f "$COMPOSE_FILE" logs --no-color
 
       - name: Stop Flink cluster
         if: always()
-        run: docker compose -f "${{ matrix.compose_file }}" down --remove-orphans
+        env:
+          COMPOSE_FILE: ${{ matrix.compose_file }}
+        run: docker compose -f "$COMPOSE_FILE" down --remove-orphans

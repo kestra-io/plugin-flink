@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
@@ -26,6 +27,7 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.flows.FlowInterface;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -163,7 +165,7 @@ class RestClusterClientTest {
             .restUrl(Property.ofValue(server.baseUrl()))
             .jarUri(Property.ofValue(jar.toUri().toString()))
             .entryClass(Property.ofValue(NoOpJob.class.getName()))
-            .args(Property.ofValue(java.util.List.of("--input", "s3://input data/")))
+            .args(Property.ofValue(List.of("--input", "s3://input data/")))
             .parallelism(Property.ofValue(3))
             .restoreFromSavepoint(Property.ofValue("s3://savepoints/restore"))
             .allowNonRestoredState(Property.ofValue(true))
@@ -530,7 +532,7 @@ class RestClusterClientTest {
             .type(MonitorJob.class.getName())
             .restUrl(Property.ofValue(server.baseUrl()))
             .jobId(Property.ofValue(JOB_ID))
-            .expectedTerminalStates(Property.ofValue(java.util.List.of(expectedState)))
+            .expectedTerminalStates(Property.ofValue(List.of(expectedState)))
             .build();
         var runContextTask = Submit.builder()
             .id("rest-client-monitor-context-" + expectedState.toLowerCase())
@@ -564,7 +566,7 @@ class RestClusterClientTest {
         }
     }
 
-    private RunContext runContext(io.kestra.core.models.tasks.Task task) {
+    private RunContext runContext(Task task) {
         return TestsUtils.mockRunContext(runContextFactory, task, new HashMap<>());
     }
 
