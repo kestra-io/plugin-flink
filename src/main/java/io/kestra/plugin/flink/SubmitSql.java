@@ -132,7 +132,9 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     @Schema(
         title = "Connection timeout",
-        description = "Connection timeout in seconds, minimum 1; defaults to 30."
+        description = """
+            Connection timeout in seconds, minimum 1; defaults to 30.
+            """
     )
     @Builder.Default
     @PluginProperty(group = "connection")
@@ -173,10 +175,10 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     private SubmitSql.Output execute(RunContext runContext, HttpClient client, String rGatewayUrl, String rStatement)
         throws Exception {
-        Logger logger = runContext.logger();
+        var logger = runContext.logger();
 
         // Create or get session
-        String sessionHandle = createOrGetSession(runContext, client, rGatewayUrl);
+        var sessionHandle = createOrGetSession(runContext, client, rGatewayUrl);
 
         // Render sessionName before try block to avoid exception suppression in finally
         String sessionName = this.sessionName != null ? runContext.render(this.sessionName).as(String.class).orElse(null) : null;
@@ -185,7 +187,7 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         boolean keepSessionOpen = false;
         try {
             // Execute SQL statement
-            String operationHandle = executeStatement(runContext, client, rGatewayUrl, sessionHandle, rStatement);
+            var operationHandle = executeStatement(runContext, client, rGatewayUrl, sessionHandle, rStatement);
 
             // Wait for completion and get results
             result = waitForOperationCompletion(runContext, client, rGatewayUrl, sessionHandle, operationHandle);
