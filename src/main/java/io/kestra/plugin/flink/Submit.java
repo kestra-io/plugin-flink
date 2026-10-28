@@ -245,11 +245,10 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
             }
 
             if (args != null) {
-                var renderedArgs = runContext.render(args)
-                    .asList(String.class);
+                var rArgs = runContext.render(args).asList(String.class);
 
-                if (renderedArgs != null && !renderedArgs.isEmpty()) {
-                    payload.put("programArgsList", renderedArgs);
+                if (rArgs != null && !rArgs.isEmpty()) {
+                    payload.put("programArgsList", rArgs);
                 }
             }
 

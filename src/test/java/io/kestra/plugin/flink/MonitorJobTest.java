@@ -94,5 +94,11 @@ class MonitorJobTest {
         assertThat(monitorFiveSeconds.getInterval(), is(Duration.ofSeconds(5)));
         assertThat(monitorThirtySeconds.getInterval(), is(Duration.ofSeconds(30)));
         assertThat(monitorDefault.getInterval(), is(Duration.ofSeconds(10)));
+
+        var serialized = JacksonMapper.ofJson().writeValueAsString(monitorFiveSeconds);
+
+        var deserialized = JacksonMapper.ofJson().readValue(serialized, MonitorJob.class);
+
+        assertThat(deserialized.getInterval(), is(Duration.ofSeconds(5)));
     }
 }

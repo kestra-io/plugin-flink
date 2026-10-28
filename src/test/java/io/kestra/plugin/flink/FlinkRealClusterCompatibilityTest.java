@@ -186,7 +186,7 @@ class FlinkRealClusterCompatibilityTest {
 
     private String waitForJobState(String jobId, String expectedState, Duration timeout) throws Exception {
         var deadline = Instant.now().plus(timeout);
-        String state = "UNKNOWN";
+        var state = "UNKNOWN";
         while (Instant.now().isBefore(deadline)) {
             var job = getJson(REST_URL + "/jobs/" + jobId);
             state = job.path("state").asText();
