@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.serializers.JacksonMapper;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -59,41 +60,39 @@ class MonitorJobTest {
     }
 
     @Test
-    void testMonitorJobUsesConfiguredInterval() {
-        var monitor = MonitorJob.builder()
-            .id("test-monitor-custom-interval")
-            .type(MonitorJob.class.getName())
-            .restUrl(Property.ofValue("http://localhost:8081"))
-            .jobId(Property.ofValue("test-job-id"))
-            .interval(Property.ofValue(Duration.parse("PT30S")))
-            .build();
+    void testMonitorJobDeserializesConfiguredIntervals() throws Exception {
+        var monitorFiveSeconds = JacksonMapper.ofYaml().readValue(
+            """
+                id: test-monitor-five-seconds
+                type: io.kestra.plugin.flink.MonitorJob
+                restUrl: http://localhost:8081
+                jobId: test-job-id
+                interval: PT5S
+                """,
+            MonitorJob.class
+        );
+        var monitorThirtySeconds = JacksonMapper.ofYaml().readValue(
+            """
+                id: test-monitor-thirty-seconds
+                type: io.kestra.plugin.flink.MonitorJob
+                restUrl: http://localhost:8081
+                jobId: test-job-id
+                interval: PT30S
+                """,
+            MonitorJob.class
+        );
+        var monitorDefault = JacksonMapper.ofYaml().readValue(
+            """
+                id: test-monitor-default
+                type: io.kestra.plugin.flink.MonitorJob
+                restUrl: http://localhost:8081
+                jobId: test-job-id
+                """,
+            MonitorJob.class
+        );
 
-        assertThat(monitor.getInterval(), is(Duration.parse("PT30S")));
-    }
-
-    @Test
-    void testMonitorJobKeepsDefaultForTemplatedInterval() {
-        var monitor = MonitorJob.builder()
-            .id("test-monitor-templated-interval")
-            .type(MonitorJob.class.getName())
-            .restUrl(Property.ofValue("http://localhost:8081"))
-            .jobId(Property.ofValue("test-job-id"))
-            .interval(Property.ofExpression("{{ inputs.interval }}"))
-            .build();
-
-        assertThat(monitor.getInterval(), is(Duration.parse("PT10S")));
-    }
-
-    @Test
-    void testMonitorJobKeepsDefaultForNullInterval() {
-        var monitor = MonitorJob.builder()
-            .id("test-monitor-null-interval")
-            .type(MonitorJob.class.getName())
-            .restUrl(Property.ofValue("http://localhost:8081"))
-            .jobId(Property.ofValue("test-job-id"))
-            .interval(null)
-            .build();
-
-        assertThat(monitor.getInterval(), is(Duration.parse("PT10S")));
+        assertThat(monitorFiveSeconds.getInterval(), is(Duration.ofSeconds(5)));
+        assertThat(monitorThirtySeconds.getInterval(), is(Duration.ofSeconds(30)));
+        assertThat(monitorDefault.getInterval(), is(Duration.ofSeconds(10)));
     }
 }

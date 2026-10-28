@@ -3,7 +3,6 @@ package io.kestra.plugin.flink;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -33,7 +32,6 @@ import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.core.utils.PebbleUtil;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -110,7 +108,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
     )
     @Builder.Default
     @PluginProperty(group = "execution")
-    private Property<Duration> interval = Property.ofValue(Duration.parse("PT10S"));
+    private Duration interval = DEFAULT_INTERVAL;
 
     @Schema(
         title = "Fail on error",
@@ -226,18 +224,7 @@ public class MonitorJob extends AbstractTrigger implements PollingTriggerInterfa
 
     @Override
     public Duration getInterval() {
-        if (interval == null) {
-            return DEFAULT_INTERVAL;
-        }
-        var configuredInterval = interval.toString();
-        if (PebbleUtil.containsOpeningBlockDelimiter(configuredInterval)) {
-            return DEFAULT_INTERVAL;
-        }
-        try {
-            return Duration.parse(configuredInterval);
-        } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("interval must be an ISO-8601 duration: " + configuredInterval, e);
-        }
+        return interval;
     }
 
     String getStateDetails(RunContext runContext, String restUrl, String jobId) throws Exception {
