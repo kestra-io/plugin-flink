@@ -50,6 +50,9 @@ dependencies {
     annotationProcessor group: "io.kestra", name: "processor", version: kestraVersion
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
+
+    // Apache Flink
+    implementation "org.apache.flink:flink-clients:2.0.2"
 }
 
 
@@ -58,6 +61,53 @@ dependencies {
  **********************************************************************************************************************/
 test {
     useJUnitPlatform()
+}
+
+def flinkCompatibilityFixtureClasses = layout.buildDirectory.dir("flink-compatibility-fixture/classes")
+
+def compileFlinkCompatibilityFixture = tasks.register("compileFlinkCompatibilityFixture", JavaCompile) {
+    source = fileTree("src/testFixtures/flinkCompatibility/java")
+    classpath = configurations.runtimeClasspath
+    destinationDirectory = flinkCompatibilityFixtureClasses
+    options.release.set(17)
+    options.encoding = "UTF-8"
+}
+
+def flinkCompatibilityFixtureJar = tasks.register("flinkCompatibilityFixtureJar", Jar) {
+    dependsOn compileFlinkCompatibilityFixture
+    archiveFileName.set("flink-compatibility-fixture.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("flink-compatibility-fixture"))
+    from(flinkCompatibilityFixtureClasses)
+}
+
+tasks.register("flinkCompatibilityTest", Test) {
+    group = "verification"
+    description = "Runs real-cluster Flink client compatibility tests against the local Flink cluster."
+    dependsOn testClasses, flinkCompatibilityFixtureJar
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching("io.kestra.plugin.flink.FlinkRealClusterCompatibilityTest")
+        failOnNoMatchingTests = true
+    }
+    systemProperty("flink.integration.realCluster", "true")
+    systemProperty(
+        "flink.integration.expectedVersion",
+        providers.gradleProperty("flinkCompatibilityVersion").getOrElse("1.20.1")
+    )
+    systemProperty(
+        "flink.integration.composeFile",
+        providers.gradleProperty("flinkCompatibilityComposeFile").getOrElse("docker-compose-ci.yml")
+    )
+    systemProperty(
+        "flink.integration.restUrl",
+        providers.gradleProperty("flinkCompatibilityRestUrl").getOrElse("http://localhost:8081")
+    )
+    systemProperty(
+        "flink.integration.fixtureJar",
+        layout.buildDirectory.file("flink-compatibility-fixture/flink-compatibility-fixture.jar").get().asFile.absolutePath
+    )
 }
 
 dependencies {
@@ -88,6 +138,8 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
     testImplementation "org.hamcrest:hamcrest"
     testImplementation "org.hamcrest:hamcrest-library"
+    testImplementation "org.mockito:mockito-core"
+    testImplementation "org.wiremock:wiremock-standalone:3.13.1"
 }
 
 /**********************************************************************************************************************\

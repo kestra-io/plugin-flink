@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.serializers.JacksonMapper;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -56,5 +57,48 @@ class MonitorJobTest {
         // Test that defaults are properly initialized for trigger
         assertThat(monitor.getInterval(), is(Duration.parse("PT10S")));
         assertThat(monitor.getFailOnError(), notNullValue());
+    }
+
+    @Test
+    void testMonitorJobDeserializesConfiguredIntervals() throws Exception {
+        var monitorFiveSeconds = JacksonMapper.ofYaml().readValue(
+            """
+                id: test-monitor-five-seconds
+                type: io.kestra.plugin.flink.MonitorJob
+                restUrl: http://localhost:8081
+                jobId: test-job-id
+                interval: PT5S
+                """,
+            MonitorJob.class
+        );
+        var monitorThirtySeconds = JacksonMapper.ofYaml().readValue(
+            """
+                id: test-monitor-thirty-seconds
+                type: io.kestra.plugin.flink.MonitorJob
+                restUrl: http://localhost:8081
+                jobId: test-job-id
+                interval: PT30S
+                """,
+            MonitorJob.class
+        );
+        var monitorDefault = JacksonMapper.ofYaml().readValue(
+            """
+                id: test-monitor-default
+                type: io.kestra.plugin.flink.MonitorJob
+                restUrl: http://localhost:8081
+                jobId: test-job-id
+                """,
+            MonitorJob.class
+        );
+
+        assertThat(monitorFiveSeconds.getInterval(), is(Duration.ofSeconds(5)));
+        assertThat(monitorThirtySeconds.getInterval(), is(Duration.ofSeconds(30)));
+        assertThat(monitorDefault.getInterval(), is(Duration.ofSeconds(10)));
+
+        var serialized = JacksonMapper.ofJson().writeValueAsString(monitorFiveSeconds);
+
+        var deserialized = JacksonMapper.ofJson().readValue(serialized, MonitorJob.class);
+
+        assertThat(deserialized.getInterval(), is(Duration.ofSeconds(5)));
     }
 }

@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
@@ -16,20 +15,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -37,8 +36,8 @@ import io.kestra.core.models.annotations.PluginProperty;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Submit Flink job from JAR over REST",
-    description = "Uploads a JAR to the Flink REST API then runs its entry class. Supports program arguments, explicit parallelism, and savepoint restore. Large JAR uploads are buffered in memory."
+    title = "Submit Flink job from JAR",
+    description = "Uploads a JAR to the Flink REST API and submits it through the cluster-side JAR run endpoint, so the job entry point runs on the Flink cluster rather than the Kestra worker. Supports program arguments, explicit parallelism, job configuration, and savepoint restore. The upload buffers large JARs in memory. HTTPS uses the JVM default trust configuration; custom truststores and mutual TLS are not configurable here."
 )
 @Plugin(
     examples = {
@@ -61,15 +60,20 @@ import io.kestra.core.models.annotations.PluginProperty;
                       - "--output"
                       - "s3://output/results/"
                     parallelism: 4
+
+                # The JAR must exist at jarUri and contain the specified entryClass.
+                # Arguments must be valid for that class; the Flink cluster must be reachable.
+                # Configure credentials and filesystem support for the JAR's storage in the Kestra runtime.
                 """
         )
     }
 )
 public class Submit extends Task implements RunnableTask<Submit.Output> {
+    private static final ObjectMapper JSON = JacksonMapper.ofJson();
 
     @Schema(
         title = "Flink REST API URL",
-        description = "Base URL of the Flink cluster REST API (e.g., `http://flink-jobmanager:8081`)."
+        description = "Base URL of the Flink cluster REST API (e.g., `http://flink-jobmanager:8081`). HTTPS uses the JVM default trust configuration; custom truststores and mutual TLS are not configurable here."
     )
     @NotNull
     @PluginProperty(group = "main")
@@ -93,7 +97,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
     @Schema(
         title = "Program arguments",
-        description = "Arguments passed to the main method; rendered then space-joined."
+        description = "Arguments passed to the Flink job's main method as a rendered list."
     )
     @PluginProperty(group = "advanced")
     private Property<List<String>> args;
@@ -133,18 +137,18 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
         String rJarUri = runContext.render(this.jarUri).as(String.class).orElseThrow();
         String rEntryClass = runContext.render(this.entryClass).as(String.class).orElseThrow();
-        String rRestUrl = runContext.render(this.restUrl).as(String.class).orElseThrow();
+        var rRestUrl = FlinkRestUrl.normalize(runContext.render(this.restUrl).as(String.class).orElseThrow());
 
         logger.info("Submitting Flink job: {} from {}", rEntryClass, rJarUri);
 
         // Download JAR if needed
-        URI jarLocation = downloadJar(runContext, rJarUri);
+        var jarLocation = downloadJar(runContext, rJarUri);
 
         // Upload JAR to Flink cluster
-        String jarId = uploadJarToFlink(runContext, rRestUrl, jarLocation);
+        var jarId = uploadJarToFlink(runContext, rRestUrl, jarLocation);
 
-        // Submit job
-        String jobId = submitJob(runContext, rRestUrl, jarId, rEntryClass);
+        // Submit job to the Flink cluster
+        var jobId = submitJob(runContext, rRestUrl, jarId, rEntryClass);
 
         logger.info("Successfully submitted Flink job with ID: {}", jobId);
 
@@ -161,7 +165,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
         // For remote JARs (including kestra://), download to working directory
         try (InputStream jarStream = runContext.storage().getFile(URI.create(jarUri))) {
-            java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("flink-job", ".jar");
+            var tempFile = java.nio.file.Files.createTempFile("flink-job", ".jar");
             java.nio.file.Files.copy(jarStream, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             tempFile.toFile().deleteOnExit();
             return tempFile.toUri();
@@ -170,32 +174,32 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
     private String uploadJarToFlink(RunContext runContext, String restUrl, URI jarLocation) throws Exception {
         try (
-            HttpClient client = HttpClient.builder()
+            var client = HttpClient.builder()
                 .runContext(runContext)
                 .build()
         ) {
-            java.nio.file.Path jarPath = java.nio.file.Paths.get(jarLocation);
-            String fileName = jarPath.getFileName().toString();
+            var jarPath = java.nio.file.Paths.get(jarLocation);
+            var fileName = jarPath.getFileName().toString();
 
             // Create multipart request body for JAR upload
-            String boundary = "----FlinkJarUpload" + System.currentTimeMillis();
-            String prefix = "--" + boundary + "\r\n"
+            var boundary = "----FlinkJarUpload" + System.currentTimeMillis();
+            var prefix = "--" + boundary + "\r\n"
                 + "Content-Disposition: form-data; name=\"jarfile\"; filename=\"" + fileName + "\"\r\n"
                 + "Content-Type: application/java-archive\r\n\r\n";
-            String suffix = "\r\n--" + boundary + "--\r\n";
+            var suffix = "\r\n--" + boundary + "--\r\n";
 
             // Read jar file content and create full body
-            byte[] jarContent = java.nio.file.Files.readAllBytes(jarPath);
-            byte[] prefixBytes = prefix.getBytes(StandardCharsets.UTF_8);
-            byte[] suffixBytes = suffix.getBytes(StandardCharsets.UTF_8);
+            var jarContent = java.nio.file.Files.readAllBytes(jarPath);
+            var prefixBytes = prefix.getBytes(StandardCharsets.UTF_8);
+            var suffixBytes = suffix.getBytes(StandardCharsets.UTF_8);
 
-            byte[] fullBody = new byte[prefixBytes.length + jarContent.length + suffixBytes.length];
+            var fullBody = new byte[prefixBytes.length + jarContent.length + suffixBytes.length];
             System.arraycopy(prefixBytes, 0, fullBody, 0, prefixBytes.length);
             System.arraycopy(jarContent, 0, fullBody, prefixBytes.length, jarContent.length);
             System.arraycopy(suffixBytes, 0, fullBody, prefixBytes.length + jarContent.length, suffixBytes.length);
 
-            HttpRequest request = HttpRequest.builder()
-                .uri(URI.create(restUrl + "/v1/jars/upload"))
+            var request = HttpRequest.builder()
+                .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jars/upload")))
                 .method("POST")
                 .addHeader("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .body(
@@ -205,7 +209,7 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
                 )
                 .build();
 
-            HttpResponse<String> response = client.request(request, String.class);
+            var response = client.request(request, String.class);
 
             if (response.getStatus().getCode() != 200) {
                 throw new RuntimeException("Failed to upload JAR: " + response.getStatus().getCode() + " - " + response.getBody());
@@ -213,8 +217,8 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
             // Parse response to get JAR ID
             // Expected response format: {"filename": "...", "status": "success"}
-            String responseBody = response.getBody();
-            String jarId = extractJarIdFromResponse(responseBody);
+            var responseBody = response.getBody();
+            var jarId = extractJarIdFromResponse(responseBody);
 
             runContext.logger().info("Uploaded JAR with ID: {}", jarId);
             return jarId;
@@ -223,50 +227,60 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
 
     private String submitJob(RunContext runContext, String restUrl, String jarId, String entryClass) throws Exception {
         try (
-            HttpClient client = HttpClient.builder()
+            var client = HttpClient.builder()
                 .runContext(runContext)
                 .build()
         ) {
-
-            // Build job submission payload
-            Map<String, Object> payload = new LinkedHashMap<>();
+            var payload = new LinkedHashMap<String, Object>();
             payload.put("entryClass", entryClass);
 
             if (parallelism != null) {
-                Integer parallelismValue = runContext.render(parallelism).as(Integer.class).orElse(null);
+                var parallelismValue = runContext.render(parallelism)
+                    .as(Integer.class)
+                    .orElse(null);
+
                 if (parallelismValue != null) {
                     payload.put("parallelism", parallelismValue);
                 }
             }
 
             if (args != null) {
-                List<String> renderedArgs = runContext.render(args).asList(String.class);
-                if (renderedArgs != null && !renderedArgs.isEmpty()) {
-                    payload.put("programArgs", String.join(" ", renderedArgs));
+                var rArgs = runContext.render(args).asList(String.class);
+
+                if (rArgs != null && !rArgs.isEmpty()) {
+                    payload.put("programArgsList", rArgs);
                 }
             }
 
             if (restoreFromSavepoint != null) {
-                String savepointPath = runContext.render(restoreFromSavepoint).as(String.class).orElse(null);
+                var savepointPath = runContext.render(restoreFromSavepoint)
+                    .as(String.class)
+                    .orElse(null);
+
                 if (savepointPath != null) {
                     payload.put("savepointPath", savepointPath);
-                    Boolean allowNonRestored = runContext.render(allowNonRestoredState).as(Boolean.class).orElse(false);
+
+                    var allowNonRestored = runContext.render(allowNonRestoredState)
+                        .as(Boolean.class)
+                        .orElse(false);
+
                     payload.put("allowNonRestoredState", allowNonRestored);
                 }
             }
 
             if (jobConfig != null) {
-                Map<String, String> config = runContext.render(jobConfig).asMap(String.class, String.class);
+                var config = runContext.render(jobConfig)
+                    .asMap(String.class, String.class);
+
                 if (config != null && !config.isEmpty()) {
                     payload.put("flinkConfiguration", config);
                 }
             }
 
-            ObjectMapper mapper = new ObjectMapper();
-            String requestBody = mapper.writeValueAsString(payload);
+            var requestBody = JSON.writeValueAsString(payload);
 
-            HttpRequest request = HttpRequest.builder()
-                .uri(URI.create(restUrl + "/v1/jars/" + jarId + "/run"))
+            var request = HttpRequest.builder()
+                .uri(URI.create(FlinkRestUrl.endpoint(restUrl, "/v1/jars/" + jarId + "/run")))
                 .method("POST")
                 .addHeader("Content-Type", "application/json")
                 .body(
@@ -276,33 +290,38 @@ public class Submit extends Task implements RunnableTask<Submit.Output> {
                 )
                 .build();
 
-            HttpResponse<String> response = client.request(request, String.class);
+            var response = client.request(request, String.class);
 
             if (response.getStatus().getCode() != 200) {
-                throw new RuntimeException("Failed to submit job: " + response.getStatus().getCode() + " - " + response.getBody());
+                throw new RuntimeException(
+                    "Failed to submit job: "
+                        + response.getStatus().getCode()
+                        + " - "
+                        + response.getBody()
+                );
             }
 
-            // Extract job ID from response
-            String jobId = extractJobIdFromResponse(response.getBody());
-            return jobId;
+            return extractJobIdFromResponse(response.getBody());
         }
     }
 
     private String extractJarIdFromResponse(String responseBody) {
-        Matcher matcher = Pattern.compile("\"filename\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
+        var matcher = Pattern.compile("\"filename\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
         if (matcher.find()) {
-            String filename = matcher.group(1);
-            int separator = filename.lastIndexOf('/');
+            var filename = matcher.group(1);
+            var separator = filename.lastIndexOf('/');
             return separator >= 0 ? filename.substring(separator + 1) : filename;
         }
         throw new RuntimeException("Could not extract JAR ID from response: " + responseBody);
     }
 
     private String extractJobIdFromResponse(String responseBody) {
-        Matcher matcher = Pattern.compile("\"jobid\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
+        var matcher = Pattern.compile("\"jobid\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
+
         if (matcher.find()) {
             return matcher.group(1);
         }
+
         throw new RuntimeException("Could not extract job ID from response: " + responseBody);
     }
 
