@@ -30,6 +30,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
@@ -135,11 +136,13 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
     @Schema(
         title = "Connection timeout",
-        description = "Connection timeout in seconds; defaults to 30."
+        description = """
+            Connection timeout in seconds, minimum 1; defaults to 30.
+            """
     )
     @Builder.Default
     @PluginProperty(group = "connection")
-    private Property<Integer> connectionTimeout = Property.ofValue(30);
+    private Property<@Min(1) Integer> connectionTimeout = Property.ofValue(30);
 
     @Schema(
         title = "Statement timeout",
@@ -165,8 +168,22 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
 
         logger.info("Executing SQL statement via Flink SQL Gateway at: {}", rGatewayUrl);
 
+        try (
+            var client = HttpClient.builder()
+                .runContext(runContext)
+                .configuration(httpConfiguration(runContext))
+                .build()
+        ) {
+            return execute(runContext, client, rGatewayUrl, rStatement);
+        }
+    }
+
+    private SubmitSql.Output execute(RunContext runContext, HttpClient client, String rGatewayUrl, String rStatement)
+        throws Exception {
+        var logger = runContext.logger();
+
         // Create or get session
-        String sessionHandle = createOrGetSession(runContext, rGatewayUrl);
+        var sessionHandle = createOrGetSession(runContext, client, rGatewayUrl);
 
         // Render sessionName before try block to avoid exception suppression in finally
         String sessionName = this.sessionName != null ? runContext.render(this.sessionName).as(String.class).orElse(null) : null;
@@ -175,10 +192,10 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         boolean keepSessionOpen = false;
         try {
             // Execute SQL statement
-            String operationHandle = executeStatement(runContext, rGatewayUrl, sessionHandle, rStatement);
+            var operationHandle = executeStatement(runContext, client, rGatewayUrl, sessionHandle, rStatement);
 
             // Wait for completion and get results
-            result = waitForOperationCompletion(runContext, rGatewayUrl, sessionHandle, operationHandle);
+            result = waitForOperationCompletion(runContext, client, rGatewayUrl, sessionHandle, operationHandle);
             keepSessionOpen = "RUNNING".equals(result.getStatus());
 
             logger.info("SQL statement executed successfully. Operation handle: {}", operationHandle);
@@ -194,13 +211,13 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             // Close session if we created it (no session name means we created a temporary session)
             // BUT keep it open if the operation is still running (streaming jobs)
             if (sessionName == null && !keepSessionOpen) {
-                closeSession(runContext, rGatewayUrl, sessionHandle);
+                closeSession(runContext, client, rGatewayUrl, sessionHandle);
             }
         }
     }
 
     HttpConfiguration httpConfiguration(RunContext runContext) throws IllegalVariableEvaluationException {
-        int rConnectionTimeout = runContext.render(connectionTimeout).as(Integer.class).orElse(30);
+        var rConnectionTimeout = runContext.render(connectionTimeout).as(Integer.class).orElse(30);
 
         return HttpConfiguration.builder()
             .timeout(
@@ -211,13 +228,8 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
             .build();
     }
 
-    private String createOrGetSession(RunContext runContext, String gatewayUrl)
+    private String createOrGetSession(RunContext runContext, HttpClient client, String gatewayUrl)
         throws Exception {
-
-        HttpClient client = HttpClient.builder()
-            .runContext(runContext)
-            .configuration(httpConfiguration(runContext))
-            .build();
 
         String sessionName = this.sessionName != null ? runContext.render(this.sessionName).as(String.class).orElse(null) : null;
 
@@ -282,13 +294,8 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         return sessionHandle;
     }
 
-    private String executeStatement(RunContext runContext, String gatewayUrl, String sessionHandle, String statement)
+    private String executeStatement(RunContext runContext, HttpClient client, String gatewayUrl, String sessionHandle, String statement)
         throws Exception {
-
-        HttpClient client = HttpClient.builder()
-            .runContext(runContext)
-            .configuration(httpConfiguration(runContext))
-            .build();
 
         ObjectNode payload = JSON.createObjectNode().put("statement", statement);
 
@@ -312,14 +319,9 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         return extractOperationHandleFromResponse(response.getBody());
     }
 
-    private OperationResult waitForOperationCompletion(RunContext runContext, String gatewayUrl,
+    private OperationResult waitForOperationCompletion(RunContext runContext, HttpClient client, String gatewayUrl,
         String sessionHandle, String operationHandle)
         throws IOException, InterruptedException, IllegalVariableEvaluationException {
-
-        HttpClient client = HttpClient.builder()
-            .runContext(runContext)
-            .configuration(httpConfiguration(runContext))
-            .build();
 
         int timeout = Math.max(1, runContext.render(statementTimeout).as(Integer.class).orElse(300));
         final int intervalSec = 1;
@@ -398,13 +400,8 @@ public class SubmitSql extends Task implements RunnableTask<SubmitSql.Output> {
         }
     }
 
-    private void closeSession(RunContext runContext, String gatewayUrl, String sessionHandle) {
+    private void closeSession(RunContext runContext, HttpClient client, String gatewayUrl, String sessionHandle) {
         try {
-            HttpClient client = HttpClient.builder()
-                .runContext(runContext)
-                .configuration(httpConfiguration(runContext))
-                .build();
-
             HttpRequest request = HttpRequest.builder()
                 .uri(URI.create(gatewayUrl + "/v1/sessions/" + sessionHandle))
                 .method("DELETE")
