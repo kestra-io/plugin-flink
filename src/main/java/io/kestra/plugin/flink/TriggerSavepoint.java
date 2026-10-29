@@ -26,7 +26,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
-import io.kestra.core.models.tasks.retrys.Exponential;
+import io.kestra.core.models.tasks.retrys.Constant;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
 
@@ -97,8 +97,6 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int SAVEPOINT_POLL_INTERVAL_SECONDS = 5;
-    private static final int SAVEPOINT_MAX_RETRY_INTERVAL_SECONDS = SAVEPOINT_POLL_INTERVAL_SECONDS + 1;
-    private static final double SAVEPOINT_RETRY_DELAY_FACTOR = 1.0001;
 
     @Schema(
         title = "Flink REST API URL",
@@ -246,12 +244,9 @@ public class TriggerSavepoint extends Task implements RunnableTask<TriggerSavepo
         final var maxAttempts = Math.max(1, (int) Math.ceil((double) timeoutSeconds / intervalSec)); // ceil, clamp ≥1
         final var deadline = java.time.Instant.now().plusSeconds(timeoutSeconds);
 
-        // Failsafe requires a factor above 1 and a max interval above the initial interval; this keeps polling effectively fixed.
         return RetryUtils.<String, Exception> of(
-            Exponential.builder()
-                .delayFactor(SAVEPOINT_RETRY_DELAY_FACTOR)
+            Constant.builder()
                 .interval(Duration.ofSeconds(intervalSec))
-                .maxInterval(Duration.ofSeconds(SAVEPOINT_MAX_RETRY_INTERVAL_SECONDS))
                 .maxAttempts(maxAttempts)
                 .build()
         ).run(
