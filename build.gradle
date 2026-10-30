@@ -52,7 +52,7 @@ dependencies {
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
 
     // Apache Flink
-    implementation "org.apache.flink:flink-clients:2.0.2"
+    implementation "org.apache.flink:flink-clients:2.3.0"
 }
 
 
