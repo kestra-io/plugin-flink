@@ -24,7 +24,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
-import io.kestra.core.models.tasks.retrys.Exponential;
+import io.kestra.core.models.tasks.retrys.Constant;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.RetryUtils;
@@ -97,7 +97,6 @@ import lombok.experimental.SuperBuilder;
 public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
     private static final ObjectMapper JSON = JacksonMapper.ofJson();
     private static final int POLL_INTERVAL_SECONDS = 1;
-    private static final int MAX_RETRY_INTERVAL_SECONDS = 2;
     private static final String JOB_CANCELLATION_TIMEOUT_MESSAGE = "Job cancellation timed out";
 
     @Schema(
@@ -282,10 +281,8 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         String savepointPath;
         try {
             savepointPath = RetryUtils.<String, Exception> of(
-                Exponential.builder()
-                    .delayFactor(2.0)
+                Constant.builder()
                     .interval(Duration.ofSeconds(POLL_INTERVAL_SECONDS))
-                    .maxInterval(Duration.ofSeconds(MAX_RETRY_INTERVAL_SECONDS))
                     .maxAttempts(maxAttempts)
                     .build()
             ).run(
@@ -358,10 +355,8 @@ public class CancelJob extends Task implements RunnableTask<CancelJob.Output> {
         Boolean completed;
         try {
             completed = RetryUtils.<Boolean, Exception> of(
-                Exponential.builder()
-                    .delayFactor(2.0)
+                Constant.builder()
                     .interval(Duration.ofSeconds(POLL_INTERVAL_SECONDS))
-                    .maxInterval(Duration.ofSeconds(MAX_RETRY_INTERVAL_SECONDS))
                     .maxAttempts(maxAttempts)
                     .build()
             ).run(
