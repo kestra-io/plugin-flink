@@ -55,6 +55,11 @@ dependencies {
     implementation "org.apache.flink:flink-clients:2.3.0"
 }
 
+configurations.all {
+    // SEC-0139: lz4-java < 1.11.4 is vulnerable (pulled in via flink-runtime), remove once Flink ships >= 1.11.4.
+    resolutionStrategy.force "at.yawk.lz4:lz4-java:1.11.4"
+}
+
 
 /**********************************************************************************************************************\
  * Test
