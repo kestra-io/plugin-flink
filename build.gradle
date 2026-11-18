@@ -56,6 +56,8 @@ dependencies {
 }
 
 configurations.all {
+    // SEC-0370: snappy-java comes via flink-runtime, remove once Flink ships >= 1.1.10.9.
+    resolutionStrategy.force 'org.xerial.snappy:snappy-java:1.1.10.12'
     // SEC-0139: lz4-java < 1.11.4 is vulnerable (pulled in via flink-runtime), remove once Flink ships >= 1.11.4.
     resolutionStrategy.force "at.yawk.lz4:lz4-java:1.11.4"
 }
